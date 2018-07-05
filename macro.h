@@ -1,0 +1,14 @@
+#pragma once
+
+#define WIDTH 512 
+#define HEIGHT 384
+
+#define SAMPLES 1024
+
+#define BLOCK_SIZE 8
+#define NUM_BLOCKS WIDTH*HEIGHT/BLOCK_SIZE/BLOCK_SIZE
+
+#define RAY_BOUNCE 4
+
+
+#define M_PI 3.14159265359f
