@@ -8,3 +8,8 @@ ${EXEC} : ${SRC}
 
 tests : ${EXEC}
 	${EXEC}
+
+git : 
+	git add *.h *.cuh *.cu Makefile
+	git commit -m "updated"
+	git push
