@@ -8,6 +8,7 @@
 #include "scene.cuh"
 #include "macro.h"
 #include "diffuse.cuh"
+#include "lock.cuh"
 
 __global__ void renderKernal (float3 *output, Scene* scene, curandState_t* randstates) {
     unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;   
@@ -49,10 +50,12 @@ __global__ void renderKernal (float3 *output, Scene* scene, curandState_t* rands
 
         //printf("sampleAccuColor.x = %f\n", sampleAccuColor.x);
         finalColor += sampleAccuColor * (1.0f / (float)SAMPLES); 
-    }       
+    }
     output[idx] = make_float3(clamp(finalColor.x, 0.0f, 1.0f),
                               clamp(finalColor.y, 0.0f, 1.0f),
                               clamp(finalColor.z, 0.0f, 1.0f));
+    // if(idx % 10000 == 0)
+    //     printf("idx = %d, (%.3f, %.3f, %.3f)\n", idx, output[idx].x, output[idx].y, output[idx].z); 
     
     //float r = curand_uniform(&randstates[idx]);
     //output[idx] = make_float3(r, r, r);
@@ -93,7 +96,7 @@ int main(){
     renderKernal <<< grid, block >>> (output_d, scene_d, randstates);
 
     // copy device to host
-    cudaMemcpy(output_h, output_d, WIDTH * HEIGHT *sizeof(float3), cudaMemcpyDeviceToHost);
+    cudaMemcpy(output_h, output_d, WIDTH * HEIGHT * sizeof(float3), cudaMemcpyDeviceToHost);
 
     // output
     writeToPPM("result.ppm", WIDTH, HEIGHT, output_h);

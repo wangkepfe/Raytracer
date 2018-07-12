@@ -78,8 +78,6 @@ struct Scene{
         x = r.orig + r.dir*t;
         n = s.getNormalAt(x, r);
         mat = s.mat;
-        if(s.mat.emi.x != 0)
-            printf("yeah\n");
         return t < inf;
     }
 };
