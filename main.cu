@@ -3,62 +3,89 @@
 #include <vector_types.h>
 #include <device_launch_parameters.h>
 #include <time.h>
+#include <curand.h>
+#include <curand_kernel.h>
 
 #include "io_utils.h"
-#include "scene.cuh"
 #include "macro.h"
-#include "diffuse.cuh"
-#include "lock.cuh"
 
-__global__ void renderKernal (float3 *output, Scene* scene, curandState_t* randstates) {
+#include "geometryIntersect.cuh"
+#include "surface.cuh"
+
+#define NUM_SPHERES 4
+
+struct Attr{
+    float* spheres;
+    int* materials;
+};
+
+__global__ void renderKernal (float3 *output, Attr attr, curandState_t* randstates) {
     unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;   
     unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
     unsigned int idx = (HEIGHT - y - 1) * WIDTH + x; 
 
-    float3 camOrig = make_float3(50.0f, 52.0f, 295.6f);
-    float3 camDir = normalize(make_float3(0.0f, -0.042612f, -1.0f));
+    float* spheres = attr.spheres;
+    int* materials = attr.materials;
 
-    float3 deltaX = make_float3(WIDTH * 0.5135f / HEIGHT, 0.0f, 0.0f);
-    float3 deltaY = normalize(cross(deltaX, camDir)) * 0.5135f; //(.5135 is field of view angle)
+    float3 camOrig = make_float3(0.0f, 0.0f, 0.0f);
+    float3 camDir = normalize(make_float3(0.0f, 0.0f, 1.0f));
 
-    float3 finalColor = make_float3(0.0f, 0.0f, 0.0f); // res is final pixel color       
-   
-    for (int s = 0; s < SAMPLES; s++) {  // samples per pixel
-        // compute primary ray
-        float3 rd = camDir + deltaX*((.25 + x) / WIDTH - .5) + deltaY*((.25 + y) / HEIGHT - .5);
-        Ray r = Ray(camOrig + rd * 40.0f, normalize(rd));
+    float fov = 0.5135f;
+    float3 deltaX = make_float3(WIDTH * fov / HEIGHT, 0.0f, 0.0f);
+    float3 deltaY = make_float3(0.0f, fov, 0.0f);
 
-        // add incoming radiance to pixelcolor
-        float3 sampleAccuColor = make_float3(0.0f, 0.0f, 0.0f);
-        float3 colorMask = make_float3(1.0f, 1.0f, 1.0f); 
+    float3 finalColor = make_float3(0.0f, 0.0f, 0.0f);
 
-        // ray bounce loop (no Russian Roulette used) 
+    for (int s = 0; s < SAMPLES; s++) {
+        float3 rayDirection = normalize(camDir + deltaX * (x * 2.0f / WIDTH - 1.0f) + deltaY * (y * 2.0f / HEIGHT - 1.0f));
+
+        float3 currentRayOrig = camOrig;
+        float3 currentRayDir = rayDirection; 
+
+        float3 accumulativeColor = make_float3(0.0f, 0.0f, 0.0f);
+        float3 colorMask = make_float3(1.0f, 1.0f, 1.0f);
+
         for (int bounces = 0; bounces < RAY_BOUNCE; bounces++) {
-            float t;
-            float3 x, n;
-            Material mat;      
+
+            for (int i = 0; i < NUM_SPHERES; ++i) {
+                float sphereRadius = spheres[i * 4];
+                float3 sphereCenter = make_float3(spheres[i * 4 + 1], spheres[i * 4 + 2], spheres[i * 4 + 3]);
+                int material = materials[i];
+    
+                float distanceCameraToObject = intersectSphereRay(sphereRadius, sphereCenter, currentRayOrig, currentRayDir);
+    
+                if (distanceCameraToObject == 0)
+                    continue;
+
+                // emission
+                accumulativeColor += colorMask * make_float3(1.0f, 1.0f, 1.0f);
+
+                //
+                float3 hitPoint = currentRayOrig + currentRayDir * distanceCameraToObject;
+                float3 normalAtHitPoint = getSphereNormal(hitPoint, sphereCenter, currentRayDir);
+                float3 materialColor = make_float3(0.9f, 0.3f, 0.2f);
         
-            if (!scene->intersect(r, t, x, n, mat))
-                break; 
+                // diffuse
+                if (material == 1) {
+                    diffuseSurface(
+                        currentRayOrig,
+                        currentRayDir,
+                        accumulativeColor,
+                        hitPoint,
+                        normalAtHitPoint,
+                        materialColor,
+                        randstates,
+                        idx
+                    );
+                }
 
-            sampleAccuColor += colorMask * mat.emi;
-
-            if (mat.refl == DIFF) {
-                diffuseShader(r, colorMask, x, n, mat, randstates, idx);
+                // final color
+                finalColor += accumulativeColor / SAMPLES;               
             }
         }
-
-        //printf("sampleAccuColor.x = %f\n", sampleAccuColor.x);
-        finalColor += sampleAccuColor * (1.0f / (float)SAMPLES); 
     }
-    output[idx] = make_float3(clamp(finalColor.x, 0.0f, 1.0f),
-                              clamp(finalColor.y, 0.0f, 1.0f),
-                              clamp(finalColor.z, 0.0f, 1.0f));
-    // if(idx % 10000 == 0)
-    //     printf("idx = %d, (%.3f, %.3f, %.3f)\n", idx, output[idx].x, output[idx].y, output[idx].z); 
-    
-    //float r = curand_uniform(&randstates[idx]);
-    //output[idx] = make_float3(r, r, r);
+
+    output[idx] = make_float3(clamp(finalColor.x, 0.0f, 1.0f), clamp(finalColor.y, 0.0f, 1.0f), clamp(finalColor.z, 0.0f, 1.0f));
 }
 
 __global__ void initRandStates(unsigned int seed, curandState_t* randstates) {
@@ -74,26 +101,46 @@ int main(){
     dim3 block(BLOCK_SIZE, BLOCK_SIZE, 1);   
     dim3 grid(WIDTH / block.x, HEIGHT / block.y, 1);
 
+    // rand states
+    curandState_t* randstates;
+    cudaMalloc((void**) &randstates, NUM_BLOCKS * sizeof(curandState_t));
+
+    // run
+    initRandStates<<<grid, block>>>(time(NULL), randstates);
+
     // output
     float3* output_h = new float3[WIDTH * HEIGHT];
     float3* output_d;
     cudaMalloc(&output_d, WIDTH * HEIGHT * sizeof(float3));
 
-    // rand states
-    curandState_t* randstates;
-    cudaMalloc((void**) &randstates, NUM_BLOCKS * sizeof(curandState_t));
-    
     // scene
-    Scene* scene_h = new Scene;
-    Scene* scene_d;
-    cudaMalloc(&scene_d, sizeof(Scene));
+    float spheres[4 * NUM_SPHERES] {
+        10.0f, 0.0f, 0.0f, 100.0f,
+        10.0f, 30.0f, 0.0f, 100.0f,
+        10.0f, 30.0f, 30.0f, 100.0f,
+        10.0f, 0.0f, 30.0f, 100.0f};
+    int materials[NUM_SPHERES] {0, 1, 1, 1};
+
+    float* spheres_h = new float[4 * NUM_SPHERES];
+    int* materials_h = new int[NUM_SPHERES];
+    
+    for (int i = 0; i < 4 * NUM_SPHERES; ++i) spheres_h[i] = spheres[i];
+    for (int i = 0; i < NUM_SPHERES; ++i) materials_h[i] = materials[i];
+        
+    float* spheres_d;
+    int* materials_d;
+
+    cudaMalloc(&spheres_d, 4 * NUM_SPHERES * sizeof(float));
+    cudaMalloc(&materials_d, NUM_SPHERES * sizeof(int));
 
     // copy host to device
-    cudaMemcpy(scene_d, scene_h, sizeof(Scene), cudaMemcpyHostToDevice);
+    cudaMemcpy(spheres_d, spheres_h, 4 * NUM_SPHERES * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(materials_d, materials_h, NUM_SPHERES * sizeof(int), cudaMemcpyHostToDevice);
 
+    Attr attr{spheres_d, materials_d};
+    
     // run
-    initRandStates<<<grid, block>>>(time(NULL), randstates);
-    renderKernal <<< grid, block >>> (output_d, scene_d, randstates);
+    renderKernal <<< grid, block >>> (output_d, attr, randstates);
 
     // copy device to host
     cudaMemcpy(output_h, output_d, WIDTH * HEIGHT * sizeof(float3), cudaMemcpyDeviceToHost);
@@ -102,9 +149,9 @@ int main(){
     writeToPPM("result.ppm", WIDTH, HEIGHT, output_h);
 
     // clean
-    cudaFree(scene_d);  
+    cudaFree(spheres_d);  
     cudaFree(output_d);  
     cudaFree(randstates);
-    delete[] scene_h;
+    delete[] spheres_h;
     delete[] output_h;
 }

@@ -8,6 +8,7 @@ ${EXEC} : ${SRC}
 
 tests : ${EXEC}
 	${EXEC}
+	"C:\Program Files\ImageGlass\ImageGlass.exe" result.ppm
 
 git : 
 	git add *.h *.cuh *.cu Makefile
