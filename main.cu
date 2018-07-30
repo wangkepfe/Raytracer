@@ -11,21 +11,43 @@
 
 #include "geometryIntersect.cuh"
 #include "surface.cuh"
+#include "implicitGeometry.cuh"
 
-#define NUM_SPHERES 4
+enum{
+    EMISSION_ONLY,
+    DIFFUSE,
+    SPECULAR,
+    REFRACTION,
+};
+
+enum{
+    IMPLICIT_SPHERE,
+    IMPLICIT_AABB,
+};
+
+struct Material{
+    int surfaceType;
+    float3 colorEmission;
+    float3 surfaceColor;
+};
+
+struct Geometry{
+    int geometryType;
+    int geometryIdx;
+    int materialIdx;
+};
 
 struct Attr{
-    float* spheres;
-    int* materials;
+    int numberOfObject;
+    Sphere* spheres;
+    Material* materials;
+    Geometry* geometries;
 };
 
 __global__ void renderKernal (float3 *output, Attr attr, curandState_t* randstates) {
     unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;   
     unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
     unsigned int idx = (HEIGHT - y - 1) * WIDTH + x; 
-
-    float* spheres = attr.spheres;
-    int* materials = attr.materials;
 
     float3 camOrig = make_float3(0.0f, 0.0f, 0.0f);
     float3 camDir = normalize(make_float3(0.0f, 0.0f, 1.0f));
@@ -37,50 +59,52 @@ __global__ void renderKernal (float3 *output, Attr attr, curandState_t* randstat
     float3 finalColor = make_float3(0.0f, 0.0f, 0.0f);
 
     for (int s = 0; s < SAMPLES; s++) {
+    //for (int s = 0; s < 1; s++) {
         float3 rayDirection = normalize(camDir + deltaX * (x * 2.0f / WIDTH - 1.0f) + deltaY * (y * 2.0f / HEIGHT - 1.0f));
 
-        float3 currentRayOrig = camOrig;
-        float3 currentRayDir = rayDirection; 
+        Ray currentRay {camOrig, rayDirection};
 
         float3 accumulativeColor = make_float3(0.0f, 0.0f, 0.0f);
         float3 colorMask = make_float3(1.0f, 1.0f, 1.0f);
 
         for (int bounces = 0; bounces < RAY_BOUNCE; bounces++) {
+        //for (int bounces = 0; bounces < 1; bounces++) {
 
-            for (int i = 0; i < NUM_SPHERES; ++i) {
-                float sphereRadius = spheres[i * 4];
-                float3 sphereCenter = make_float3(spheres[i * 4 + 1], spheres[i * 4 + 2], spheres[i * 4 + 3]);
-                int material = materials[i];
+            for (int i = 0; i < attr.numberOfObject; ++i) {
+            //for (int i = 0; i < 1; ++i) {
+                Geometry geometry = attr.geometries[i];
+
+                if (geometry.geometryType == IMPLICIT_SPHERE) {
+                    Sphere sphere = attr.spheres[geometry.geometryIdx];
+                    Material material = attr.materials[geometry.materialIdx];
+
+                    float distanceCameraToObject = intersectSphereRay(sphere, currentRay);
     
-                float distanceCameraToObject = intersectSphereRay(sphereRadius, sphereCenter, currentRayOrig, currentRayDir);
-    
-                if (distanceCameraToObject == 0)
-                    continue;
+                    if (distanceCameraToObject < 0.04f)
+                        continue;
+                    
+                    // emission
+                    accumulativeColor += colorMask * material.colorEmission;
 
-                // emission
-                accumulativeColor += colorMask * make_float3(1.0f, 1.0f, 1.0f);
+                    float3 hitPoint = currentRay.orig + currentRay.dir * distanceCameraToObject;
+                    float3 normalAtHitPoint = getSphereNormal(hitPoint, sphere.orig, currentRay.dir);
+            
+                    // diffuse
+                    if (material.surfaceType == DIFFUSE) {
+                        diffuseSurface(
+                            currentRay,
+                            colorMask,
+                            hitPoint,
+                            normalAtHitPoint,
+                            material.surfaceColor,
+                            randstates,
+                            idx
+                        );
+                    }
 
-                //
-                float3 hitPoint = currentRayOrig + currentRayDir * distanceCameraToObject;
-                float3 normalAtHitPoint = getSphereNormal(hitPoint, sphereCenter, currentRayDir);
-                float3 materialColor = make_float3(0.9f, 0.3f, 0.2f);
-        
-                // diffuse
-                if (material == 1) {
-                    diffuseSurface(
-                        currentRayOrig,
-                        currentRayDir,
-                        accumulativeColor,
-                        hitPoint,
-                        normalAtHitPoint,
-                        materialColor,
-                        randstates,
-                        idx
-                    );
-                }
-
-                // final color
-                finalColor += accumulativeColor / SAMPLES;               
+                    finalColor += accumulativeColor / SAMPLES;    
+                    //finalColor += accumulativeColor;         
+                }        
             }
         }
     }
@@ -114,30 +138,43 @@ int main(){
     cudaMalloc(&output_d, WIDTH * HEIGHT * sizeof(float3));
 
     // scene
-    float spheres[4 * NUM_SPHERES] {
-        10.0f, 0.0f, 0.0f, 100.0f,
-        10.0f, 30.0f, 0.0f, 100.0f,
-        10.0f, 30.0f, 30.0f, 100.0f,
-        10.0f, 0.0f, 30.0f, 100.0f};
-    int materials[NUM_SPHERES] {0, 1, 1, 1};
+    Sphere spheres[] {
+        {float3{0.0f, 0.0f, 100.0f} ,10.0f},
+        {float3{30.0f, 0.0f, 100.0f}, 10.0f},
+        {float3{30.0f, 30.0f, 100.0f} ,10.0f},
+        {float3{0.0f, 30.0f, 100.0f}, 10.0f}
+    };
 
-    float* spheres_h = new float[4 * NUM_SPHERES];
-    int* materials_h = new int[NUM_SPHERES];
-    
-    for (int i = 0; i < 4 * NUM_SPHERES; ++i) spheres_h[i] = spheres[i];
-    for (int i = 0; i < NUM_SPHERES; ++i) materials_h[i] = materials[i];
-        
-    float* spheres_d;
-    int* materials_d;
+    Material materials[] {
+        {EMISSION_ONLY, float3{1.0f, 1.0f, 1.0f}, float3{1.0f, 1.0f, 1.0f}},
+        {DIFFUSE, float3{0.0f, 0.0f, 0.0f}, float3{1.0f, 0.2f, 0.1f}}
+    };
 
-    cudaMalloc(&spheres_d, 4 * NUM_SPHERES * sizeof(float));
-    cudaMalloc(&materials_d, NUM_SPHERES * sizeof(int));
+    Geometry geometries[] {
+        {IMPLICIT_SPHERE, 0, 0},
+        {IMPLICIT_SPHERE, 1, 1},
+        {IMPLICIT_SPHERE, 2, 1},
+        {IMPLICIT_SPHERE, 3, 1}
+    };
 
-    // copy host to device
-    cudaMemcpy(spheres_d, spheres_h, 4 * NUM_SPHERES * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(materials_d, materials_h, NUM_SPHERES * sizeof(int), cudaMemcpyHostToDevice);
+    Sphere* spheres_d;
+    Material* materials_d;
+    Geometry* geometries_d;
 
-    Attr attr{spheres_d, materials_d};
+    cudaMalloc(&spheres_d, sizeof(spheres));
+    cudaMalloc(&materials_d, sizeof(materials));
+    cudaMalloc(&geometries_d, sizeof(geometries));
+
+    cudaMemcpy(spheres_d, spheres, sizeof(spheres), cudaMemcpyHostToDevice);
+    cudaMemcpy(materials_d, materials, sizeof(materials), cudaMemcpyHostToDevice);
+    cudaMemcpy(geometries_d, geometries, sizeof(geometries), cudaMemcpyHostToDevice);
+
+    Attr attr {
+        sizeof(geometries) / sizeof(Geometry), 
+        spheres_d, 
+        materials_d, 
+        geometries_d
+    };
     
     // run
     renderKernal <<< grid, block >>> (output_d, attr, randstates);
@@ -150,8 +187,11 @@ int main(){
 
     // clean
     cudaFree(spheres_d);  
+    cudaFree(materials_d);
+    cudaFree(geometries_d);
+
     cudaFree(output_d);  
     cudaFree(randstates);
-    delete[] spheres_h;
+
     delete[] output_h;
 }

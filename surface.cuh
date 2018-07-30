@@ -1,9 +1,10 @@
 #pragma once
 
-#include "cutil_math.h"
-
 #include <curand.h>
 #include <curand_kernel.h>
+
+#include "cutil_math.h"
+#include "implicitGeometry.cuh"
 
 // generate a cosine weighted hemisphere sampler : generate uniform points on a disk, and then project them up to the hemisphere
 __device__ static float3 cosineSampleHemisphere(float u1, float u2){
@@ -17,9 +18,8 @@ __device__ static float3 cosineSampleHemisphere(float u1, float u2){
 }
 
 __device__ static void diffuseSurface(
-    float3& rayOrig,
-    float3& rayDir,
-    float3& color,
+    Ray& ray,
+    float3& colorMask,
     const float3& hitPoint,
     const float3& normalAtHitPoint,
     const float3& materialColor,
@@ -36,10 +36,10 @@ __device__ static void diffuseSurface(
 
     float3 d = normalize(u * rdSamp.x + v * rdSamp.y + w * rdSamp.z);
 
-    rayOrig = hitPoint + normalAtHitPoint * 0.05f;     // offset ray origin slightly to prevent self intersection
-    rayDir = d;
+    ray.orig = hitPoint + normalAtHitPoint * 0.05f;     // offset ray origin slightly to prevent self intersection
+    ray.dir = d;
 
-    color *= materialColor;       // multiply with colour of object       
-    color *= dot(d, normalAtHitPoint);      // weigh light contribution using cosine of angle between incident light and normal
-    color *= 2;              // fudge factor
+    colorMask *= materialColor;       // multiply with colour of object       
+    colorMask *= dot(d, normalAtHitPoint);      // weigh light contribution using cosine of angle between incident light and normal
+    colorMask *= 2;              // fudge factor
 }

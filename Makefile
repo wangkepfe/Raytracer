@@ -13,6 +13,5 @@ tests : ${EXEC}
 git : 
 	git add *.h *.cuh *.cu Makefile
 	git status
-	git diff
 	git commit -m "updated"
 	git push

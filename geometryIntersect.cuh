@@ -1,17 +1,16 @@
 #pragma once
 
 #include "cutil_math.h"
+#include "implicitGeometry.cuh"
 
 inline __device__ float intersectSphereRay(
-    float sphereRadius,
-    const float3& sphereCenter,
-    const float3& rayOrig,
-    const float3& rayDir)
+    const Sphere& sphere,
+    const Ray& ray)
 {
-    float3 op = sphereCenter - rayOrig;
+    float3 op = sphere.orig - ray.orig;
     float t, epsilon = 0.0001f;
-    float b = dot(op, rayDir);
-    float disc = b*b - dot(op, op) + sphereRadius*sphereRadius;
+    float b = dot(op, ray.dir);
+    float disc = b * b - dot(op, op) + sphere.rad * sphere.rad;
     if (disc < 0) return 0;
     else disc = sqrtf(disc);
     return ((t = b - disc) > epsilon) ? t : (((t = b + disc) > epsilon) ? t : 0); 
