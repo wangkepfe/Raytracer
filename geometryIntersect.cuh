@@ -25,10 +25,12 @@ inline __device__ float intersectSphereRay(
 inline __device__ float3 getSphereNormal(
     const float3& pointOnSphere,
     const float3& sphereCenter,
-    float3 rayDir)
+    float3 rayDir,
+    bool& isIntoSurface)
 {
     float3 n = normalize(pointOnSphere - sphereCenter);    // normal
-    float3 nl = dot(n, rayDir) < 0 ? n : n * -1; // front facing normal
+    isIntoSurface = dot(n, rayDir) < 0;
+    float3 nl = isIntoSurface ? n : n * -1; // front facing normal
     return nl;
 }
 

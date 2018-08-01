@@ -45,23 +45,29 @@ struct Attr{
     Geometry* geometries;
 };
 
+__constant__ float sunSize = 0.97f;
+__constant__ float3 sunDir{0.0f, 1.0f, 0.0f};
+__constant__ float3 sunColor{1.0f, 0.875f, 0.75f};
+__constant__ float3 skyColor{0.5f, 0.8f, 0.9f};
+__constant__ float3 mistColor{0.02f, 0.02f, 0.02f};
+
+__constant__ float3 camOrig{0.0f, 0.0f, 0.0f};
+__constant__ float3 camDir{0.0f, 0.0f, 1.0f};
+__constant__ float camFov = 0.5135f;
+
 __global__ void renderKernal (float3 *output, Attr attr, curandState_t* randstates) {
     unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;   
     unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
     unsigned int idx = (HEIGHT - y - 1) * WIDTH + x; 
 
-    float3 camOrig = make_float3(0.0f, 0.0f, 0.0f);
-    float3 camDir = normalize(make_float3(0.0f, 0.0f, 1.0f));
-
-    float fov = 0.5135f;
-    float3 deltaX = make_float3(WIDTH * fov / HEIGHT, 0.0f, 0.0f);
-    float3 deltaY = make_float3(0.0f, fov, 0.0f);
+    float3 deltaX = make_float3(WIDTH * camFov / HEIGHT, 0.0f, 0.0f);
+    float3 deltaY = make_float3(0.0f, camFov, 0.0f);
 
     float3 finalColor = make_float3(0.0f, 0.0f, 0.0f);
 
-    for (int s = 0; s < SAMPLES; s++) {//sample
-        float3 rayDirection = normalize(camDir + deltaX * (x * 2.0f / WIDTH - 1.0f) + deltaY * (y * 2.0f / HEIGHT - 1.0f));
+    float3 rayDirection = normalize(camDir + deltaX * (x * 2.0f / WIDTH - 1.0f) + deltaY * (y * 2.0f / HEIGHT - 1.0f));
 
+    for (int s = 0; s < SAMPLES; s++) {//sample
         Ray currentRay {camOrig, rayDirection};
 
         float3 accumulativeColor = make_float3(0.0f, 0.0f, 0.0f);
@@ -70,8 +76,9 @@ __global__ void renderKernal (float3 *output, Attr attr, curandState_t* randstat
         for (int bounces = 0; bounces < RAY_BOUNCE; bounces++) {//bounce
             float3 hitPoint;
             float3 normalAtHitPoint;
+            bool isIntoSurface = true;
 
-            float nearestIntersectionDistance = 10000.0f;
+            float nearestIntersectionDistance = M_INF;
             bool hitEmptyVoidSpace = true;
             int hitObjectMaterialIdx = 0;
 
@@ -87,7 +94,7 @@ __global__ void renderKernal (float3 *output, Attr attr, curandState_t* randstat
                         nearestIntersectionDistance = distanceCameraToObject;
 
                         hitPoint = currentRay.orig + currentRay.dir * distanceCameraToObject;
-                        normalAtHitPoint = getSphereNormal(hitPoint, sphere.orig, currentRay.dir);
+                        normalAtHitPoint = getSphereNormal(hitPoint, sphere.orig, currentRay.dir, isIntoSurface);
                         hitObjectMaterialIdx = geometry.materialIdx;
                     }
                 } 
@@ -106,13 +113,19 @@ __global__ void renderKernal (float3 *output, Attr attr, curandState_t* randstat
                 }
             }// end of scene intersection
 
-            if (hitEmptyVoidSpace){
+            if (hitEmptyVoidSpace) {
+                if (dot(currentRay.dir, sunDir) > sunSize) // sun
+                    accumulativeColor += colorMask * sunColor;
+                else if (bounces == 0) // sky
+                    accumulativeColor += colorMask * skyColor;
+                else // mist
+                    accumulativeColor += colorMask * mistColor;
+
                 break;// break out of bounce
             }
 
             // surface
             Material material = attr.materials[hitObjectMaterialIdx];
-
             accumulativeColor += colorMask * material.colorEmission;
 
             if (material.surfaceType == DIFFUSE) {
@@ -127,20 +140,19 @@ __global__ void renderKernal (float3 *output, Attr attr, curandState_t* randstat
                 );
             }
             else if (material.surfaceType == SPECULAR) {
-                diffuseSurface(
+                specularSurface(
                     currentRay,
                     colorMask,
                     hitPoint,
                     normalAtHitPoint,
-                    material.surfaceColor,
-                    randstates,
-                    idx
+                    material.surfaceColor
                 );
             }
             else if (material.surfaceType == REFRACTION) {
-                diffuseSurface(
+                refractionSurface(
                     currentRay,
                     colorMask,
+                    isIntoSurface,
                     hitPoint,
                     normalAtHitPoint,
                     material.surfaceColor,
@@ -150,6 +162,7 @@ __global__ void renderKernal (float3 *output, Attr attr, curandState_t* randstat
             }
         }//end of bounce
         finalColor += accumulativeColor / SAMPLES;
+
     }//end of sample
 
     output[idx] = make_float3(clamp(finalColor.x, 0.0f, 1.0f), clamp(finalColor.y, 0.0f, 1.0f), clamp(finalColor.z, 0.0f, 1.0f));
@@ -175,34 +188,35 @@ int main(){
     // run
     initRandStates<<<grid, block>>>(time(NULL), randstates);
 
-    // output
-    float3* output_h = new float3[WIDTH * HEIGHT];
-    float3* output_d;
-    cudaMalloc(&output_d, WIDTH * HEIGHT * sizeof(float3));
-
     // scene
     Sphere spheres[] {
-        {float3{0.0f, 40.0f, 120.0f} ,10.0f},
-        {float3{30.0f, -30.0f, 100.0f}, 10.0f},
+        {float3{0.0f, -25.0f, 100.0f} ,15.0f},
+        {float3{40.0f, -25.0f, 90.0f}, 15.0f},
+        {float3{30.0f, -20.0f, 160.0f}, 20.0f},
+        {float3{-50.0f, -25.0f, 90.0f}, 15.0f}
     };
 
     AABB aabbs[] {
-        {float3{-5000.0f, -50.0f, -10.0f},float3{5000.0f, -40.0f, 5000.0f}},
-        {float3{-30.0f, -40.0f, 130.0f},float3{-10.0f, -20.0f, 120.0f}}
+        {float3{-M_INF, -50.0f, -M_INF},float3{M_INF, -40.0f, M_INF}},
+        {float3{-50.0f, -40.0f, 150.0f},float3{-30.0f, -20.0f, 130.0f}}
     };
 
     Material materials[] {
-        {EMISSION_ONLY, float3{2.0f, 1.75f, 1.5f}, float3{1.0f, 1.0f, 1.0f}},
-        {DIFFUSE, float3{0.0f, 0.0f, 0.0f}, float3{1.0f, 1.0f, 1.0f}},
-        {DIFFUSE, float3{0.0f, 0.0f, 0.0f}, float3{0.9f, 0.1f, 0.1f}},
-        {DIFFUSE, float3{0.0f, 0.0f, 0.0f}, float3{0.1f, 0.1f, 0.9f}}
+        {DIFFUSE, float3{1.0f, 1.0f, 1.0f}, float3{0.75f, 0.75f, 0.75f}},
+        {DIFFUSE, float3{0.0f, 0.0f, 0.0f}, float3{0.75f, 0.75f, 0.75f}},
+        {DIFFUSE, float3{0.0f, 0.0f, 0.0f}, float3{0.9f, 0.2f, 0.1f}},
+        {DIFFUSE, float3{0.0f, 0.0f, 0.0f}, float3{0.1f, 0.2f, 0.9f}},
+        {SPECULAR, float3{0.0f, 0.0f, 0.0f}, float3{0.1f, 0.9f, 0.1f}},
+        {REFRACTION, float3{0.0f, 0.0f, 0.0f}, float3{1.0f, 1.0f, 1.0f}}
     };
 
     Geometry geometries[] {
         {IMPLICIT_AABB, 0, 1},
         {IMPLICIT_AABB, 1, 2},
         {IMPLICIT_SPHERE, 0, 0},
-        {IMPLICIT_SPHERE, 1, 3}
+        {IMPLICIT_SPHERE, 1, 3},
+        {IMPLICIT_SPHERE, 2, 4},
+        {IMPLICIT_SPHERE, 3, 5}
     };
 
     Sphere* spheres_d;
@@ -229,21 +243,42 @@ int main(){
     };
     
     // run
-    renderKernal <<< grid, block >>> (output_d, attr, randstates);
+    float3* output = new float3[WIDTH * HEIGHT];
+    float3* output_h = new float3[WIDTH * HEIGHT];
+    float3* output_d;
+    cudaMalloc(&output_d, WIDTH * HEIGHT * sizeof(float3));
 
-    // copy device to host
-    cudaMemcpy(output_h, output_d, WIDTH * HEIGHT * sizeof(float3), cudaMemcpyDeviceToHost);
-
+    for (int i = 0; i < KERNAL_LOOP; ++i) {   
+        renderKernal <<< grid, block >>> (output_d, attr, randstates);
+        cudaMemcpy(output_h, output_d, WIDTH * HEIGHT * sizeof(float3), cudaMemcpyDeviceToHost);
+        if (i == 0) {
+            for (int j = 0; j < WIDTH * HEIGHT; ++j) {
+                output[j] = output_h[j];
+            }
+        } else {
+            for (int j = 0; j < WIDTH * HEIGHT; ++j) {
+                output[j] += output_h[j];
+                output[j] /= 2;
+            }
+        }
+        int progressPercent = i * 100 / KERNAL_LOOP;
+        if (progressPercent % 10 == 0)
+            printf("Rendering...%d%%\n", progressPercent);
+    }
+    printf("Done!\n");
+    
     // output
-    writeToPPM("result.ppm", WIDTH, HEIGHT, output_h);
+    writeToPPM("result.ppm", WIDTH, HEIGHT, output);
 
     // clean
-    cudaFree(spheres_d);  
+    cudaFree(spheres_d); 
+    cudaFree(aabbs_d);  
     cudaFree(materials_d);
     cudaFree(geometries_d);
 
     cudaFree(output_d);  
     cudaFree(randstates);
 
+    delete[] output;
     delete[] output_h;
 }
