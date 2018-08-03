@@ -14,10 +14,10 @@
 #include "implicitGeometry.cuh"
 
 enum{
-    EMISSION_ONLY,
     DIFFUSE,
     SPECULAR,
-    REFRACTION,
+    MIRROR,
+    TRANSPARENT,
 };
 
 enum{
@@ -87,27 +87,27 @@ __global__ void renderKernal (float3 *output, Attr attr, curandState_t* randstat
 
                 if (geometry.geometryType == IMPLICIT_SPHERE) {
                     Sphere sphere = attr.spheres[geometry.geometryIdx];
-                    float distanceCameraToObject = intersectSphereRay(sphere, currentRay);
+                    float distanceToObject = intersectSphereRay(sphere, currentRay);
     
-                    if (distanceCameraToObject > 0.001f && distanceCameraToObject < nearestIntersectionDistance) {
+                    if (distanceToObject > 0.001f && distanceToObject < nearestIntersectionDistance) {
                         hitEmptyVoidSpace = false;
-                        nearestIntersectionDistance = distanceCameraToObject;
+                        nearestIntersectionDistance = distanceToObject;
 
-                        hitPoint = currentRay.orig + currentRay.dir * distanceCameraToObject;
+                        hitPoint = currentRay.orig + currentRay.dir * distanceToObject;
                         normalAtHitPoint = getSphereNormal(hitPoint, sphere.orig, currentRay.dir, isIntoSurface);
                         hitObjectMaterialIdx = geometry.materialIdx;
                     }
                 } 
                 else if (geometry.geometryType == IMPLICIT_AABB) {
                     AABB aabb = attr.aabbs[geometry.geometryIdx];
-                    float distanceCameraToObject = intersectAABBRay(aabb, currentRay);
+                    float distanceToObject = intersectAABBRayBothSide(aabb, currentRay);
     
-                    if (distanceCameraToObject > 0.001f && distanceCameraToObject < nearestIntersectionDistance) {
+                    if (distanceToObject > 0.001f && distanceToObject < nearestIntersectionDistance) {
                         hitEmptyVoidSpace = false;
-                        nearestIntersectionDistance = distanceCameraToObject;
+                        nearestIntersectionDistance = distanceToObject;
 
-                        hitPoint = currentRay.orig + currentRay.dir * distanceCameraToObject;
-                        normalAtHitPoint = getAABBNormal(hitPoint, aabb, currentRay.dir);
+                        hitPoint = currentRay.orig + currentRay.dir * distanceToObject;
+                        normalAtHitPoint = getAABBNormal(hitPoint, aabb, currentRay.dir, isIntoSurface);
                         hitObjectMaterialIdx = geometry.materialIdx;
                     }                    
                 }
@@ -145,21 +145,24 @@ __global__ void renderKernal (float3 *output, Attr attr, curandState_t* randstat
                     colorMask,
                     hitPoint,
                     normalAtHitPoint,
-                    material.surfaceColor
-                );
-            }
-            else if (material.surfaceType == REFRACTION) {
-                refractionSurface(
-                    currentRay,
-                    colorMask,
-                    isIntoSurface,
-                    hitPoint,
-                    normalAtHitPoint,
                     material.surfaceColor,
                     randstates,
                     idx
                 );
             }
+            else if (material.surfaceType == MIRROR) {
+                mirrorSurface(
+                    currentRay,
+                    colorMask,
+                    hitPoint,
+                    normalAtHitPoint,
+                    material.surfaceColor
+                );
+            }
+            else if (material.surfaceType == TRANSPARENT) {
+                
+            }
+            
         }//end of bounce
         finalColor += accumulativeColor / SAMPLES;
 
@@ -193,12 +196,14 @@ int main(){
         {float3{0.0f, -25.0f, 100.0f} ,15.0f},
         {float3{40.0f, -25.0f, 90.0f}, 15.0f},
         {float3{30.0f, -20.0f, 160.0f}, 20.0f},
-        {float3{-50.0f, -25.0f, 90.0f}, 15.0f}
+        {float3{-40.0f, -25.0f, 90.0f}, 15.0f},
+        {float3{40.0f, -25.0f, 130.0f}, 15.0f}
     };
 
     AABB aabbs[] {
         {float3{-M_INF, -50.0f, -M_INF},float3{M_INF, -40.0f, M_INF}},
-        {float3{-50.0f, -40.0f, 150.0f},float3{-30.0f, -20.0f, 130.0f}}
+        {float3{-80.0f, -40.0f, -10.0f},float3{80.0f, 80.0f, 200.0f}},
+        {float3{-60.0f, -40.0f, 130.0f},float3{-30.0f, -10.0f, 160.0f}}
     };
 
     Material materials[] {
@@ -206,17 +211,20 @@ int main(){
         {DIFFUSE, float3{0.0f, 0.0f, 0.0f}, float3{0.75f, 0.75f, 0.75f}},
         {DIFFUSE, float3{0.0f, 0.0f, 0.0f}, float3{0.9f, 0.2f, 0.1f}},
         {DIFFUSE, float3{0.0f, 0.0f, 0.0f}, float3{0.1f, 0.2f, 0.9f}},
-        {SPECULAR, float3{0.0f, 0.0f, 0.0f}, float3{0.1f, 0.9f, 0.1f}},
-        {REFRACTION, float3{0.0f, 0.0f, 0.0f}, float3{1.0f, 1.0f, 1.0f}}
+        {MIRROR,  float3{0.0f, 0.0f, 0.0f}, float3{0.1f, 0.9f, 0.1f}},
+        {SPECULAR, float3{0.0f, 0.0f, 0.0f}, float3{1.0f, 1.0f, 1.0f}},
+        {SPECULAR, float3{0.0f, 0.0f, 0.0f}, float3{1.0f, 1.0f, 0.0f}}
     };
 
     Geometry geometries[] {
-        {IMPLICIT_AABB, 0, 1},
-        {IMPLICIT_AABB, 1, 2},
+        //{IMPLICIT_AABB, 0, 1},
+        {IMPLICIT_AABB, 1, 1},
+        {IMPLICIT_AABB, 2, 2},
         {IMPLICIT_SPHERE, 0, 0},
         {IMPLICIT_SPHERE, 1, 3},
         {IMPLICIT_SPHERE, 2, 4},
-        {IMPLICIT_SPHERE, 3, 5}
+        {IMPLICIT_SPHERE, 3, 5},
+        {IMPLICIT_SPHERE, 4, 6}
     };
 
     Sphere* spheres_d;

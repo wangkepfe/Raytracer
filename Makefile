@@ -11,7 +11,7 @@ tests : ${EXEC}
 	"C:\Program Files\ImageGlass\ImageGlass.exe" result.ppm
 
 git : 
-	git add *.h *.cuh *.cu Makefile
+	git add *.h *.cuh *.cu Makefile *.md
 	git status
 	git commit -m "updated"
 	git push
