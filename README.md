@@ -1,21 +1,47 @@
 # Raytracer
-## Geometry
+## Geometry model
 - [x] ray
 - [x] implicit sphere
 - [x] implicit aabb
 - [ ] triangle mesh
 
-## Geometry intersection
+## Geometry - Intersection
 - [x] ray-sphere
 - [x] ray-aabb
 - [ ] ray-triangle
-
-## Surface Model
+## Geometry - Smooth surface
+## Geometry - Tessellation
+## Accelerating Ray Tracing
+- [ ] BVH
+- [ ] KD-Trees
+## Global Illumination
+- [x] Monte Carlo Integration
+- [x] Path tracing
+- [ ] Russian Roulette
+- [ ] Importance sampling
+## Surface model
 - [x] Diffuse
 - [x] Specular
 - [x] Mirror
-- [ ] Transparent
-
+- [x] Transparent
+- [ ] Image texture and UV mapping
+## Surface advanced model
+- [ ] Subsurface Scattering / BSSRDF / Translucent 
+- [ ] Anisotropic BRDF
+- [ ] Macrofacet BRDF
+- [ ] Non-statistical / detailed / glinty BRDF
+- [ ] Hair / fur / BCSDF
+- [ ] Participating media
+- [ ] Cloth
+- [ ] Granular
+- [ ] Procedural
+## Camera model
+- [ ] Ideal thin lenses
+- [ ] Depth of Field / Bokeh
+- [ ] Compound lenses
+## Rigging and Animation
+## Simulation
+## Photon Mapping
 ## Scene building
 - Scene Attributes
 	- spheres
@@ -30,3 +56,4 @@
 	- surface type: diffuse, mirror, transparent
 	- emission color
 	- surface color
+

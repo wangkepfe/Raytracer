@@ -55,17 +55,26 @@ __constant__ float3 camOrig{0.0f, 0.0f, 0.0f};
 __constant__ float3 camDir{0.0f, 0.0f, 1.0f};
 __constant__ float camFov = 0.5135f;
 
-__global__ void renderKernal (float3 *output, Attr attr, curandState_t* randstates) {
+__global__ void renderKernal (
+    float3 *output,
+    unsigned int patch_width_offset,
+    unsigned int patch_height_offset,
+    Attr attr, 
+    curandState_t* randstates)
+{
     unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;   
     unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
-    unsigned int idx = (HEIGHT - y - 1) * WIDTH + x; 
+    unsigned int idx = (PATCH_HEIGHT - y - 1) * PATCH_WIDTH + x;
+
+    unsigned int realX = patch_width_offset + x;   
+    unsigned int realY = patch_height_offset + y;
 
     float3 deltaX = make_float3(WIDTH * camFov / HEIGHT, 0.0f, 0.0f);
     float3 deltaY = make_float3(0.0f, camFov, 0.0f);
 
     float3 finalColor = make_float3(0.0f, 0.0f, 0.0f);
 
-    float3 rayDirection = normalize(camDir + deltaX * (x * 2.0f / WIDTH - 1.0f) + deltaY * (y * 2.0f / HEIGHT - 1.0f));
+    float3 rayDirection = normalize(camDir + deltaX * (realX * 2.0f / WIDTH - 1.0f) + deltaY * (realY * 2.0f / HEIGHT - 1.0f));
 
     for (int s = 0; s < SAMPLES; s++) {//sample
         Ray currentRay {camOrig, rayDirection};
@@ -132,6 +141,7 @@ __global__ void renderKernal (float3 *output, Attr attr, curandState_t* randstat
                 diffuseSurface(
                     currentRay,
                     colorMask,
+                    
                     hitPoint,
                     normalAtHitPoint,
                     material.surfaceColor,
@@ -143,6 +153,7 @@ __global__ void renderKernal (float3 *output, Attr attr, curandState_t* randstat
                 specularSurface(
                     currentRay,
                     colorMask,
+
                     hitPoint,
                     normalAtHitPoint,
                     material.surfaceColor,
@@ -154,13 +165,23 @@ __global__ void renderKernal (float3 *output, Attr attr, curandState_t* randstat
                 mirrorSurface(
                     currentRay,
                     colorMask,
+
                     hitPoint,
                     normalAtHitPoint,
                     material.surfaceColor
                 );
             }
             else if (material.surfaceType == TRANSPARENT) {
-                
+                transparentSurface(
+                    currentRay,
+                    colorMask,
+
+                    isIntoSurface,
+                    hitPoint,
+                    normalAtHitPoint,
+                    randstates,
+                    idx
+                );
             }
             
         }//end of bounce
@@ -174,7 +195,7 @@ __global__ void renderKernal (float3 *output, Attr attr, curandState_t* randstat
 __global__ void initRandStates(unsigned int seed, curandState_t* randstates) {
     unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;   
     unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
-    unsigned int idx = (HEIGHT - y - 1) * WIDTH + x;
+    unsigned int idx = (PATCH_HEIGHT - y - 1) * PATCH_WIDTH + x;
 
     curand_init(seed, idx, 0, &randstates[idx]);
 }
@@ -182,28 +203,27 @@ __global__ void initRandStates(unsigned int seed, curandState_t* randstates) {
 int main(){
     // define dim
     dim3 block(BLOCK_SIZE, BLOCK_SIZE, 1);   
-    dim3 grid(WIDTH / block.x, HEIGHT / block.y, 1);
+    dim3 grid(PATCH_WIDTH / block.x, PATCH_HEIGHT / block.y, 1);
 
     // rand states
     curandState_t* randstates;
     cudaMalloc((void**) &randstates, NUM_BLOCKS * sizeof(curandState_t));
-
-    // run
     initRandStates<<<grid, block>>>(time(NULL), randstates);
 
     // scene
     Sphere spheres[] {
         {float3{0.0f, -25.0f, 100.0f} ,15.0f},
-        {float3{40.0f, -25.0f, 90.0f}, 15.0f},
+        {float3{50.0f, -30.0f, 100.0f}, 10.0f},
         {float3{30.0f, -20.0f, 160.0f}, 20.0f},
         {float3{-40.0f, -25.0f, 90.0f}, 15.0f},
-        {float3{40.0f, -25.0f, 130.0f}, 15.0f}
+        {float3{40.0f, -5.0f, 130.0f}, 15.0f}
     };
 
     AABB aabbs[] {
         {float3{-M_INF, -50.0f, -M_INF},float3{M_INF, -40.0f, M_INF}},
         {float3{-80.0f, -40.0f, -10.0f},float3{80.0f, 80.0f, 200.0f}},
-        {float3{-60.0f, -40.0f, 130.0f},float3{-30.0f, -10.0f, 160.0f}}
+        {float3{-60.0f, -40.0f, 130.0f},float3{-30.0f, -10.0f, 160.0f}},
+        {float3{30.0f, -40.0f, 120.0f},float3{50.0f, -20.0f, 140.0f}}
     };
 
     Material materials[] {
@@ -212,7 +232,7 @@ int main(){
         {DIFFUSE, float3{0.0f, 0.0f, 0.0f}, float3{0.9f, 0.2f, 0.1f}},
         {DIFFUSE, float3{0.0f, 0.0f, 0.0f}, float3{0.1f, 0.2f, 0.9f}},
         {MIRROR,  float3{0.0f, 0.0f, 0.0f}, float3{0.1f, 0.9f, 0.1f}},
-        {SPECULAR, float3{0.0f, 0.0f, 0.0f}, float3{1.0f, 1.0f, 1.0f}},
+        {TRANSPARENT, float3{0.0f, 0.0f, 0.0f}, float3{1.0f, 1.0f, 1.0f}},
         {SPECULAR, float3{0.0f, 0.0f, 0.0f}, float3{1.0f, 1.0f, 0.0f}}
     };
 
@@ -224,7 +244,8 @@ int main(){
         {IMPLICIT_SPHERE, 1, 3},
         {IMPLICIT_SPHERE, 2, 4},
         {IMPLICIT_SPHERE, 3, 5},
-        {IMPLICIT_SPHERE, 4, 6}
+        {IMPLICIT_SPHERE, 4, 6},
+        {IMPLICIT_AABB, 3, 5}
     };
 
     Sphere* spheres_d;
@@ -250,29 +271,50 @@ int main(){
         geometries_d
     };
     
-    // run
     float3* output = new float3[WIDTH * HEIGHT];
-    float3* output_h = new float3[WIDTH * HEIGHT];
+    for (int i = 0; i < WIDTH * HEIGHT; ++i) output[i] = make_float3(0.0f, 0.0f, 0.0f);
+    float3* output_h = new float3[PATCH_WIDTH * PATCH_HEIGHT];
     float3* output_d;
-    cudaMalloc(&output_d, WIDTH * HEIGHT * sizeof(float3));
+    cudaMalloc(&output_d, PATCH_WIDTH * PATCH_HEIGHT * sizeof(float3));
 
-    for (int i = 0; i < KERNAL_LOOP; ++i) {   
-        renderKernal <<< grid, block >>> (output_d, attr, randstates);
-        cudaMemcpy(output_h, output_d, WIDTH * HEIGHT * sizeof(float3), cudaMemcpyDeviceToHost);
-        if (i == 0) {
-            for (int j = 0; j < WIDTH * HEIGHT; ++j) {
-                output[j] = output_h[j];
+    unsigned int progressRecord = 0;
+    printf("Rendering...0%%\n");
+
+    for (unsigned int patch_i = 0; patch_i < PATCH_NUM_X; ++patch_i) {
+        for (unsigned int patch_j = 0; patch_j < PATCH_NUM_Y; ++patch_j) {
+
+            for (unsigned int kernalLoop_i = 0; kernalLoop_i < KERNAL_LOOP; ++kernalLoop_i) {   
+                renderKernal <<< grid, block >>> (
+                    output_d,
+                    patch_i*PATCH_WIDTH,
+                    (PATCH_NUM_Y - patch_j - 1)*PATCH_HEIGHT,
+                    attr,
+                    randstates);
+                cudaMemcpy(output_h, output_d, PATCH_WIDTH * PATCH_HEIGHT * sizeof(float3), cudaMemcpyDeviceToHost);
+                
+                for (unsigned int i = 0; i < PATCH_WIDTH; ++i) {
+                    for (unsigned int j = 0; j < PATCH_HEIGHT; ++j) {
+                        output[(patch_j*PATCH_HEIGHT + j) * WIDTH + patch_i*PATCH_WIDTH + i] += output_h[j * PATCH_WIDTH + i];
+                    }
+                }  
+
+                unsigned int progressPercent = ((patch_i * PATCH_NUM_Y + patch_j) * KERNAL_LOOP + kernalLoop_i) * 10 / PATCH_NUM_X / PATCH_NUM_Y / KERNAL_LOOP;
+                if (progressRecord != progressPercent) {
+                    progressRecord = progressPercent;
+                    printf("Rendering...%d0%%\n", progressRecord);
+                }
             }
-        } else {
-            for (int j = 0; j < WIDTH * HEIGHT; ++j) {
-                output[j] += output_h[j];
-                output[j] /= 2;
-            }
+            
+            // temp file
+            // char name[50];
+            // sprintf(name, "patch_%d_%d.ppm", patch_i, patch_j);
+            // writeToPPM(name, WIDTH, HEIGHT, output);
         }
-        int progressPercent = i * 100 / KERNAL_LOOP;
-        if (progressPercent % 10 == 0)
-            printf("Rendering...%d%%\n", progressPercent);
     }
+
+    for (int i = 0; i < WIDTH * HEIGHT; ++i) output[i] /= KERNAL_LOOP;
+
+    printf("Rendering...100%%\n");
     printf("Done!\n");
     
     // output

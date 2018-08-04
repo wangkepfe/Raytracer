@@ -129,11 +129,60 @@ __device__ static void mirrorSurface(
 __device__ static void transparentSurface(
     Ray& ray,
     float3& colorMask,
+
+    bool isIntoSurface,
     const float3& hitPoint,
     const float3& normalAtHitPoint,
-    const float3& materialColor,
     curandState_t* randstates,
     int idx
 ) {
-    
+    float3 d;
+    float3 x = hitPoint;
+
+    float3 n = isIntoSurface ? normalAtHitPoint : (normalAtHitPoint * -1.0f);
+    float3 nl = normalAtHitPoint;
+
+    float nc = 1.0f;  // Index of Refraction air
+    float nt = 1.5f;  // Index of Refraction glass/water
+
+    float nnt = isIntoSurface ? nc / nt : nt / nc;  // IOR ratio of refractive materials
+
+    float ddn = dot(ray.dir, nl);
+    float cos2t = 1.0f - nnt*nnt * (1.f - ddn*ddn);
+
+    if (cos2t < 0.0f) // total internal reflection 
+    {
+        d = reflect(ray.dir, n);
+        x += nl * 0.01f;
+    }
+    else // cos2t > 0
+    {
+        // compute direction of transmission ray
+        float3 tdir = normalize(ray.dir * nnt - n * ((isIntoSurface ? 1 : -1) * (ddn*nnt + sqrtf(cos2t))));
+
+        float R0 = (nt - nc)*(nt - nc) / (nt + nc)*(nt + nc);
+        float c = 1.f - (isIntoSurface ? -ddn : dot(tdir, n));
+        float Re = R0 + (1.f - R0) * c * c * c * c * c;
+        float Tr = 1 - Re; // Transmission
+        float P = .25f + .5f * Re;
+        float RP = Re / P;
+        float TP = Tr / (1.f - P);
+
+        // randomly choose reflection or transmission ray
+        if (curand_uniform(&randstates[idx]) < 0.25f) // reflection ray
+        {
+            colorMask *= RP;
+            d = reflect(ray.dir, n);
+            x += nl * 0.02f;
+        }
+        else // transmission ray
+        {
+            colorMask *= TP;
+            d = tdir; //r = Ray(x, tdir); 
+            x += nl * 0.0005f; // epsilon must be small to avoid artefacts
+        }
+    }
+
+    ray.dir = d;
+    ray.orig = x;
 }

@@ -141,3 +141,31 @@ inline __device__ float3 getAABBNormal(
     float3 nl = isIntoSurface ? normal : (-normal); // front facing normal
     return nl;
 }
+
+__device__ float RayTriangleIntersection(
+    const Ray &r,
+	const float3 &v0,
+	const float3 &edge1,
+	const float3 &edge2)
+{
+
+	float3 tvec = r.orig - v0;
+	float3 pvec = cross(r.dir, edge2);
+	float  det = dot(edge1, pvec);
+
+	det = __fdividef(1.0f, det);  // CUDA intrinsic function 
+
+	float u = dot(tvec, pvec) * det;
+
+	if (u < 0.0f || u > 1.0f)
+		return -1.0f;
+
+	float3 qvec = cross(tvec, edge1);
+
+	float v = dot(r.dir, qvec) * det;
+
+	if (v < 0.0f || (u + v) > 1.0f)
+		return -1.0f;
+
+	return dot(edge2, qvec) * det;
+}
