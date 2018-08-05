@@ -12,6 +12,7 @@
 #include "geometryIntersect.cuh"
 #include "surface.cuh"
 #include "implicitGeometry.cuh"
+#include "meshGeometry.cuh"
 
 enum{
     DIFFUSE,
@@ -23,6 +24,7 @@ enum{
 enum{
     IMPLICIT_SPHERE,
     IMPLICIT_AABB,
+    TRIANGLE_MESH,
 };
 
 struct Material{
@@ -41,6 +43,7 @@ struct Attr{
     int numberOfObject;
     Sphere* spheres;
     AABB* aabbs;
+    TriangleMesh* triMeshes;
     Material* materials;
     Geometry* geometries;
 };
@@ -57,17 +60,17 @@ __constant__ float camFov = 0.5135f;
 
 __global__ void renderKernal (
     float3 *output,
-    unsigned int patch_width_offset,
-    unsigned int patch_height_offset,
+    uint patch_width_offset,
+    uint patch_height_offset,
     Attr attr, 
     curandState_t* randstates)
 {
-    unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;   
-    unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
-    unsigned int idx = (PATCH_HEIGHT - y - 1) * PATCH_WIDTH + x;
+    uint x = blockIdx.x*blockDim.x + threadIdx.x;   
+    uint y = blockIdx.y*blockDim.y + threadIdx.y;
+    uint idx = (PATCH_HEIGHT - y - 1) * PATCH_WIDTH + x;
 
-    unsigned int realX = patch_width_offset + x;   
-    unsigned int realY = patch_height_offset + y;
+    uint realX = patch_width_offset + x;   
+    uint realY = patch_height_offset + y;
 
     float3 deltaX = make_float3(WIDTH * camFov / HEIGHT, 0.0f, 0.0f);
     float3 deltaY = make_float3(0.0f, camFov, 0.0f);
@@ -76,13 +79,13 @@ __global__ void renderKernal (
 
     float3 rayDirection = normalize(camDir + deltaX * (realX * 2.0f / WIDTH - 1.0f) + deltaY * (realY * 2.0f / HEIGHT - 1.0f));
 
-    for (int s = 0; s < SAMPLES; s++) {//sample
+    for (uint s = 0; s < SAMPLES; s++) {//sample
         Ray currentRay {camOrig, rayDirection};
 
         float3 accumulativeColor = make_float3(0.0f, 0.0f, 0.0f);
         float3 colorMask = make_float3(1.0f, 1.0f, 1.0f);
 
-        for (int bounces = 0; bounces < RAY_BOUNCE; bounces++) {//bounce
+        for (uint bounces = 0; bounces < RAY_BOUNCE; bounces++) {//bounce
             float3 hitPoint;
             float3 normalAtHitPoint;
             bool isIntoSurface = true;
@@ -91,14 +94,14 @@ __global__ void renderKernal (
             bool hitEmptyVoidSpace = true;
             int hitObjectMaterialIdx = 0;
 
-            for (int objectIdx = 0; objectIdx < attr.numberOfObject; ++objectIdx) {// scene intersection
+            for (uint objectIdx = 0; objectIdx < attr.numberOfObject; ++objectIdx) {// scene intersection
                 Geometry geometry = attr.geometries[objectIdx];
 
                 if (geometry.geometryType == IMPLICIT_SPHERE) {
                     Sphere sphere = attr.spheres[geometry.geometryIdx];
                     float distanceToObject = intersectSphereRay(sphere, currentRay);
     
-                    if (distanceToObject > 0.001f && distanceToObject < nearestIntersectionDistance) {
+                    if (distanceToObject > M_EPSILON && distanceToObject < nearestIntersectionDistance) {
                         hitEmptyVoidSpace = false;
                         nearestIntersectionDistance = distanceToObject;
 
@@ -111,7 +114,7 @@ __global__ void renderKernal (
                     AABB aabb = attr.aabbs[geometry.geometryIdx];
                     float distanceToObject = intersectAABBRayBothSide(aabb, currentRay);
     
-                    if (distanceToObject > 0.001f && distanceToObject < nearestIntersectionDistance) {
+                    if (distanceToObject > M_EPSILON && distanceToObject < nearestIntersectionDistance) {
                         hitEmptyVoidSpace = false;
                         nearestIntersectionDistance = distanceToObject;
 
@@ -119,6 +122,17 @@ __global__ void renderKernal (
                         normalAtHitPoint = getAABBNormal(hitPoint, aabb, currentRay.dir, isIntoSurface);
                         hitObjectMaterialIdx = geometry.materialIdx;
                     }                    
+                }
+                else if (geometry.geometryType == TRIANGLE_MESH) {
+                    TriangleMesh triMesh = attr.triMeshes[geometry.geometryIdx];
+                    float distanceToObject = RayTriangleMeshIntersection(normalAtHitPoint, isIntoSurface, triMesh, currentRay);
+
+                    if (distanceToObject > M_EPSILON && distanceToObject < nearestIntersectionDistance) {
+                        hitEmptyVoidSpace = false;
+                        nearestIntersectionDistance = distanceToObject;
+                        hitPoint = currentRay.orig + currentRay.dir * distanceToObject;
+                        hitObjectMaterialIdx = geometry.materialIdx;
+                    }
                 }
             }// end of scene intersection
 
@@ -192,10 +206,10 @@ __global__ void renderKernal (
     output[idx] = make_float3(clamp(finalColor.x, 0.0f, 1.0f), clamp(finalColor.y, 0.0f, 1.0f), clamp(finalColor.z, 0.0f, 1.0f));
 }
 
-__global__ void initRandStates(unsigned int seed, curandState_t* randstates) {
-    unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;   
-    unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
-    unsigned int idx = (PATCH_HEIGHT - y - 1) * PATCH_WIDTH + x;
+__global__ void initRandStates(uint seed, curandState_t* randstates) {
+    uint x = blockIdx.x*blockDim.x + threadIdx.x;   
+    uint y = blockIdx.y*blockDim.y + threadIdx.y;
+    uint idx = (PATCH_HEIGHT - y - 1) * PATCH_WIDTH + x;
 
     curand_init(seed, idx, 0, &randstates[idx]);
 }
@@ -211,45 +225,41 @@ int main(){
     initRandStates<<<grid, block>>>(time(NULL), randstates);
 
     // scene
+    AABB myHouseAABB = AABB{float3{-80.0f, -40.0f, -10.0f},float3{80.0f, 80.0f, 200.0f}};
+    Sphere sphereOnTheCeiling = Sphere{float3{0.0f, 80.0f, 100.0f} ,20.0f};
+
+    TriangleMesh bunnyMesh = loadObj("stanford_bunny.obj");
+    scaleTriangleMesh(bunnyMesh, float3{5.0f, 5.0f, 5.0f});
+    translateTriangleMesh(bunnyMesh, float3{0.0f, -10.0f, 120.0f});
+
+    Material whiteDiffuse{DIFFUSE, float3{0.0f, 0.0f, 0.0f}, float3{0.75f, 0.75f, 0.75f}};
+    Material whiteLight{DIFFUSE, float3{1.0f, 1.0f, 1.0f}, float3{0.75f, 0.75f, 0.75f}};
+
     Sphere spheres[] {
-        {float3{0.0f, -25.0f, 100.0f} ,15.0f},
-        {float3{50.0f, -30.0f, 100.0f}, 10.0f},
-        {float3{30.0f, -20.0f, 160.0f}, 20.0f},
-        {float3{-40.0f, -25.0f, 90.0f}, 15.0f},
-        {float3{40.0f, -5.0f, 130.0f}, 15.0f}
+        sphereOnTheCeiling
     };
-
     AABB aabbs[] {
-        {float3{-M_INF, -50.0f, -M_INF},float3{M_INF, -40.0f, M_INF}},
-        {float3{-80.0f, -40.0f, -10.0f},float3{80.0f, 80.0f, 200.0f}},
-        {float3{-60.0f, -40.0f, 130.0f},float3{-30.0f, -10.0f, 160.0f}},
-        {float3{30.0f, -40.0f, 120.0f},float3{50.0f, -20.0f, 140.0f}}
+        myHouseAABB
     };
-
+    TriangleMesh triMeshes[] {
+        bunnyMesh
+    };
     Material materials[] {
-        {DIFFUSE, float3{1.0f, 1.0f, 1.0f}, float3{0.75f, 0.75f, 0.75f}},
-        {DIFFUSE, float3{0.0f, 0.0f, 0.0f}, float3{0.75f, 0.75f, 0.75f}},
-        {DIFFUSE, float3{0.0f, 0.0f, 0.0f}, float3{0.9f, 0.2f, 0.1f}},
-        {DIFFUSE, float3{0.0f, 0.0f, 0.0f}, float3{0.1f, 0.2f, 0.9f}},
-        {MIRROR,  float3{0.0f, 0.0f, 0.0f}, float3{0.1f, 0.9f, 0.1f}},
-        {TRANSPARENT, float3{0.0f, 0.0f, 0.0f}, float3{1.0f, 1.0f, 1.0f}},
-        {SPECULAR, float3{0.0f, 0.0f, 0.0f}, float3{1.0f, 1.0f, 0.0f}}
+        whiteDiffuse,
+        whiteLight
     };
+    Geometry myHouse{IMPLICIT_AABB, 0, 0};
+    Geometry myCeilingLight{IMPLICIT_SPHERE, 0, 1};
 
     Geometry geometries[] {
-        //{IMPLICIT_AABB, 0, 1},
-        {IMPLICIT_AABB, 1, 1},
-        {IMPLICIT_AABB, 2, 2},
-        {IMPLICIT_SPHERE, 0, 0},
-        {IMPLICIT_SPHERE, 1, 3},
-        {IMPLICIT_SPHERE, 2, 4},
-        {IMPLICIT_SPHERE, 3, 5},
-        {IMPLICIT_SPHERE, 4, 6},
-        {IMPLICIT_AABB, 3, 5}
+        myHouse,
+        myCeilingLight,
+        {TRIANGLE_MESH, 0, 0}
     };
 
     Sphere* spheres_d;
     AABB* aabbs_d;
+    TriangleMesh* triMeshes_d;
     Material* materials_d;
     Geometry* geometries_d;
 
@@ -263,27 +273,43 @@ int main(){
     cudaMemcpy(materials_d, materials, sizeof(materials), cudaMemcpyHostToDevice);
     cudaMemcpy(geometries_d, geometries, sizeof(geometries), cudaMemcpyHostToDevice);
 
+    // tri mesh cuda malloc and memcopy
+    uint numOfTriMesh = sizeof(triMeshes) / sizeof(TriangleMesh);
+    cudaMalloc(&triMeshes_d, sizeof(triMeshes));
+    for (uint i = 0; i < numOfTriMesh; ++i) {
+        cudaMalloc(&(triMeshes_d[i].vertexPositions), sizeof(triMeshes[i].vertexPositions));
+        cudaMalloc(&(triMeshes_d[i].faces), sizeof(triMeshes[i].faces));
+
+        cudaMemcpy(&(triMeshes_d[i].vertexNum), &(triMeshes[i].vertexNum), sizeof(uint), cudaMemcpyHostToDevice);
+        cudaMemcpy(&(triMeshes_d[i].faceNum), &(triMeshes[i].faceNum), sizeof(uint), cudaMemcpyHostToDevice);
+
+        cudaMemcpy(triMeshes_d[i].vertexPositions, triMeshes[i].vertexPositions, sizeof(triMeshes[i].vertexPositions), cudaMemcpyHostToDevice);
+        cudaMemcpy(triMeshes_d[i].faces, triMeshes[i].faces, sizeof(triMeshes[i].faces), cudaMemcpyHostToDevice);  
+    }
+
+
     Attr attr {
         sizeof(geometries) / sizeof(Geometry), 
         spheres_d, 
         aabbs_d,
+        triMeshes_d,
         materials_d, 
         geometries_d
     };
     
     float3* output = new float3[WIDTH * HEIGHT];
-    for (int i = 0; i < WIDTH * HEIGHT; ++i) output[i] = make_float3(0.0f, 0.0f, 0.0f);
+    for (uint i = 0; i < WIDTH * HEIGHT; ++i) output[i] = make_float3(0.0f, 0.0f, 0.0f);
     float3* output_h = new float3[PATCH_WIDTH * PATCH_HEIGHT];
     float3* output_d;
     cudaMalloc(&output_d, PATCH_WIDTH * PATCH_HEIGHT * sizeof(float3));
 
-    unsigned int progressRecord = 0;
+    uint progressRecord = 0;
     printf("Rendering...0%%\n");
 
-    for (unsigned int patch_i = 0; patch_i < PATCH_NUM_X; ++patch_i) {
-        for (unsigned int patch_j = 0; patch_j < PATCH_NUM_Y; ++patch_j) {
+    for (uint patch_i = 0; patch_i < PATCH_NUM_X; ++patch_i) {
+        for (uint patch_j = 0; patch_j < PATCH_NUM_Y; ++patch_j) {
 
-            for (unsigned int kernalLoop_i = 0; kernalLoop_i < KERNAL_LOOP; ++kernalLoop_i) {   
+            for (uint kernalLoop_i = 0; kernalLoop_i < KERNAL_LOOP; ++kernalLoop_i) {   
                 renderKernal <<< grid, block >>> (
                     output_d,
                     patch_i*PATCH_WIDTH,
@@ -292,13 +318,13 @@ int main(){
                     randstates);
                 cudaMemcpy(output_h, output_d, PATCH_WIDTH * PATCH_HEIGHT * sizeof(float3), cudaMemcpyDeviceToHost);
                 
-                for (unsigned int i = 0; i < PATCH_WIDTH; ++i) {
-                    for (unsigned int j = 0; j < PATCH_HEIGHT; ++j) {
+                for (uint i = 0; i < PATCH_WIDTH; ++i) {
+                    for (uint j = 0; j < PATCH_HEIGHT; ++j) {
                         output[(patch_j*PATCH_HEIGHT + j) * WIDTH + patch_i*PATCH_WIDTH + i] += output_h[j * PATCH_WIDTH + i];
                     }
                 }  
 
-                unsigned int progressPercent = ((patch_i * PATCH_NUM_Y + patch_j) * KERNAL_LOOP + kernalLoop_i) * 10 / PATCH_NUM_X / PATCH_NUM_Y / KERNAL_LOOP;
+                uint progressPercent = ((patch_i * PATCH_NUM_Y + patch_j) * KERNAL_LOOP + kernalLoop_i) * 10 / PATCH_NUM_X / PATCH_NUM_Y / KERNAL_LOOP;
                 if (progressRecord != progressPercent) {
                     progressRecord = progressPercent;
                     printf("Rendering...%d0%%\n", progressRecord);
@@ -312,7 +338,7 @@ int main(){
         }
     }
 
-    for (int i = 0; i < WIDTH * HEIGHT; ++i) output[i] /= KERNAL_LOOP;
+    for (uint i = 0; i < WIDTH * HEIGHT; ++i) output[i] /= KERNAL_LOOP;
 
     printf("Rendering...100%%\n");
     printf("Done!\n");
@@ -326,9 +352,16 @@ int main(){
     cudaFree(materials_d);
     cudaFree(geometries_d);
 
+    for (uint i = 0; i < numOfTriMesh; ++i) {
+        cudaFree(triMeshes_d[i].vertexPositions);
+        cudaFree(triMeshes_d[i].faces);
+    }
+    cudaFree(triMeshes_d);  
+
     cudaFree(output_d);  
     cudaFree(randstates);
 
+    deleteTriangleMeshArray(triMeshes, numOfTriMesh);
     delete[] output;
     delete[] output_h;
 }

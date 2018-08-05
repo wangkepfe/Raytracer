@@ -2,6 +2,7 @@
 
 #include "cutil_math.h"
 #include "implicitGeometry.cuh"
+#include "meshGeometry.cuh"
 
 inline __device__ float3 minf3(float3 a, float3 b){ return make_float3(a.x < b.x ? a.x : b.x, a.y < b.y ? a.y : b.y, a.z < b.z ? a.z : b.z); }
 inline __device__ float3 maxf3(float3 a, float3 b){ return make_float3(a.x > b.x ? a.x : b.x, a.y > b.y ? a.y : b.y, a.z > b.z ? a.z : b.z); }
@@ -148,7 +149,6 @@ __device__ float RayTriangleIntersection(
 	const float3 &edge1,
 	const float3 &edge2)
 {
-
 	float3 tvec = r.orig - v0;
 	float3 pvec = cross(r.dir, edge2);
 	float  det = dot(edge1, pvec);
@@ -169,3 +169,41 @@ __device__ float RayTriangleIntersection(
 
 	return dot(edge2, qvec) * det;
 }
+
+inline __device__ float3 getTriangleNormal(
+    float3 rayDir,
+	const float3 &edge1,
+    const float3 &edge2,
+    bool& isIntoSurface)
+{
+    float3 normal = cross(edge1, edge2);
+    isIntoSurface = dot(normal, rayDir) < 0;
+    float3 nl = isIntoSurface ? normal : (-normal); // front facing normal
+    return nl;
+}
+
+__device__ float RayTriangleMeshIntersection(
+    float3& normal,
+    bool& isIntoSurface,
+
+    const TriangleMesh& mesh,
+    const Ray& ray)
+{
+    for (uint i = 0 ; i < mesh.faceNum; ++i) {
+        uint3 face = mesh.faces[i];
+        float3 v0 = mesh.vertexPositions[face.x];
+        float3 v1 = mesh.vertexPositions[face.y];
+        float3 v2 = mesh.vertexPositions[face.z];
+        float3 edge1 = v1 - v0;
+        float3 edge2 = v2 - v0;
+        float distanceRayTri = RayTriangleIntersection(ray, v0, edge1, edge2);
+        if (distanceRayTri < 0.0f) {
+            continue;
+        } else {
+            normal = getTriangleNormal(ray.dir, edge1, edge2, isIntoSurface);
+            return distanceRayTri;
+        }
+    }
+    return -1.0f;
+}
+

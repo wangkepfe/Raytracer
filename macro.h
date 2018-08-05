@@ -1,10 +1,10 @@
 #pragma once
 
-#define KERNAL_LOOP 10
+#define KERNAL_LOOP 4
 #define SAMPLES 512
-#define RAY_BOUNCE 7
+#define RAY_BOUNCE 6
 
-#define __SETTING__RESOLUTION 1
+#define __SETTING__RESOLUTION 2
 
 #if __SETTING__RESOLUTION == 1
     #define WIDTH 1024 
