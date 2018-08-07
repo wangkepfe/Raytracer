@@ -2,40 +2,77 @@
 
 #include "cutil_math.h"
 
-struct TriangleMesh{
+struct Vertex{
+    float3 position;
+    //float3 normal;
+    //float2 uv;
+};
+
+using Face = uint3;
+
+struct TriMesh{
+    uint vertexNum;
+    uint faceNum;
+    
+    uint vertexStartIndex;
+    uint faceStartIndex;
+    
+    //AABB boundingBox;
+};
+
+void printTriMesh(const TriMesh& m)
+{
+    std::cout << "vertexNum is " << m.vertexNum << std::endl
+              << "faceNum is " << m.faceNum << std::endl
+              << "vertexStartIndex is " << m.vertexStartIndex << std::endl
+              << "faceStartIndex is " << m.faceStartIndex << std::endl
+              << std::endl;
+}
+
+struct TriMesh_d{
     uint vertexNum;
     uint faceNum;
 
-    float3* vertexPositions;
-    uint3* faces;
+    Vertex* vertices;
+    Face* faces;
 
-    // future features
     //AABB boundingBox;
-    //float3* faceVertexNormals;
-    //float3* faceVertexUVs;
+
+    __device__ TriMesh_d(uint vertexNum, uint faceNum, Vertex* vertices, Face* faces)
+    :vertexNum {vertexNum},
+    faceNum {faceNum},
+    vertices {vertices},
+    faces {faces}
+    {}
 };
 
-static void translateTriangleMesh(TriangleMesh& meshRef, const float3& transVec) {
+#define MESH_PARAM_REF Vertex* vertices, Face* faces, TriMesh& meshRef
+#define MESH_PARAM_REF_ROOF Vertex* vertices, Face* faces, TriMesh& meshRef, uint& verticeRoof, uint& faceRoof
+
+#define VERTEX_POSITION(__I__) vertices[meshRef.vertexStartIndex + __I__].position
+#define FACE(__I__) faces[meshRef.faceStartIndex + __I__]
+
+static void translateTriMesh(MESH_PARAM_REF, const float3& transVec) {
     for (uint i = 0; i < meshRef.vertexNum; ++i) {
-        meshRef.vertexPositions[i] += transVec;
+        VERTEX_POSITION(i) += transVec;
     }
 }
 
-static void scaleTriangleMesh(TriangleMesh& meshRef, const float3& scaleVec) {
+static void scaleTriMesh(MESH_PARAM_REF, const float3& scaleVec) {
     for (uint i = 0; i < meshRef.vertexNum; ++i) {
-        meshRef.vertexPositions[i].x *= scaleVec.x;
-        meshRef.vertexPositions[i].y *= scaleVec.y;
-        meshRef.vertexPositions[i].z *= scaleVec.z;
+        VERTEX_POSITION(i).x *= scaleVec.x;
+        VERTEX_POSITION(i).y *= scaleVec.y;
+        VERTEX_POSITION(i).z *= scaleVec.z;
     }
 }
 
-static void rotateTriangleMesh(TriangleMesh& meshRef, const float3& rotateVec) {
+static void rotateTriMesh(MESH_PARAM_REF, const float3& rotateVec) {
     if (rotateVec.x != 0) {
         float cosTheta = cos(rotateVec.x);
         float sinTheta = sin(rotateVec.x);
         for (uint i = 0; i < meshRef.vertexNum; ++i) {
-            meshRef.vertexPositions[i].y = meshRef.vertexPositions[i].y * cosTheta - meshRef.vertexPositions[i].z * sinTheta;
-            meshRef.vertexPositions[i].z = meshRef.vertexPositions[i].y * sinTheta + meshRef.vertexPositions[i].z * cosTheta;
+            VERTEX_POSITION(i).y = VERTEX_POSITION(i).y * cosTheta - VERTEX_POSITION(i).z * sinTheta;
+            VERTEX_POSITION(i).z = VERTEX_POSITION(i).y * sinTheta + VERTEX_POSITION(i).z * cosTheta;
         }
     }
 
@@ -43,8 +80,8 @@ static void rotateTriangleMesh(TriangleMesh& meshRef, const float3& rotateVec) {
         float cosTheta = cos(rotateVec.y);
         float sinTheta = sin(rotateVec.y);
         for (uint i = 0; i < meshRef.vertexNum; ++i) {
-            meshRef.vertexPositions[i].x = meshRef.vertexPositions[i].x * cosTheta - meshRef.vertexPositions[i].z * sinTheta;
-            meshRef.vertexPositions[i].z = meshRef.vertexPositions[i].x * sinTheta + meshRef.vertexPositions[i].z * cosTheta;
+            VERTEX_POSITION(i).x = VERTEX_POSITION(i).x * cosTheta - VERTEX_POSITION(i).z * sinTheta;
+            VERTEX_POSITION(i).z = VERTEX_POSITION(i).x * sinTheta + VERTEX_POSITION(i).z * cosTheta;
         }
     }
 
@@ -52,16 +89,8 @@ static void rotateTriangleMesh(TriangleMesh& meshRef, const float3& rotateVec) {
         float cosTheta = cos(rotateVec.z);
         float sinTheta = sin(rotateVec.z);
         for (uint i = 0; i < meshRef.vertexNum; ++i) {
-            meshRef.vertexPositions[i].x = meshRef.vertexPositions[i].x * cosTheta - meshRef.vertexPositions[i].y * sinTheta;
-            meshRef.vertexPositions[i].y = meshRef.vertexPositions[i].x * sinTheta + meshRef.vertexPositions[i].y * cosTheta;
+            VERTEX_POSITION(i).x = VERTEX_POSITION(i).x * cosTheta - VERTEX_POSITION(i).y * sinTheta;
+            VERTEX_POSITION(i).y = VERTEX_POSITION(i).x * sinTheta + VERTEX_POSITION(i).y * cosTheta;
         }
     }
-}
-
-static void deleteTriangleMeshArray(TriangleMesh* ptr, uint size) {
-    for (uint i = 0; i < size; ++i) {
-        delete [] ptr[i].vertexPositions;
-        delete [] ptr[i].faces;
-    }
-    delete [] ptr;
 }

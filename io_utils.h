@@ -14,7 +14,7 @@ inline int toInt(float x){ return int(pow(clamp(x, 0.0f, 1.0f), 1 / 2.2) * 255 +
 inline void writeToPPM(const char* fname, int width, int height, float3* buffer){
     FILE *f = fopen(fname, "w");          
     fprintf(f, "P3\n%d %d\n%d\n", width, height, 255);
-    for (int i = 0; i < width * height; i++)  // loop over pixels, write RGB values
+    for (int i = 0; i < width * height; i++)
         fprintf(f, "%d %d %d ", 
             toInt(buffer[i].x),
             toInt(buffer[i].y),
@@ -23,40 +23,36 @@ inline void writeToPPM(const char* fname, int width, int height, float3* buffer)
     printf("Successfully wrote result image to %s\n", fname);
 }
 
-inline TriangleMesh loadObj(const char* fname) {
-    TriangleMesh meshResult;
-
+inline void loadObj(const char* fname, MESH_PARAM_REF_ROOF) {
     objl::Loader Loader;
     bool loadout = Loader.LoadFile(fname);
 
     if (!loadout) {
         printf("load failed!!\n");
-        return {};
+        return;
     }
 
-    for (int i = 0; i < Loader.LoadedMeshes.size(); i++) {
-        objl::Mesh curMesh = Loader.LoadedMeshes[i];
+    objl::Mesh curMesh = Loader.LoadedMeshes[0];
 
-        meshResult.vertexNum = curMesh.Vertices.size();
-        meshResult.vertexPositions = new float3[meshResult.vertexNum];
+    // position
+    meshRef.vertexNum = curMesh.Vertices.size();
+    meshRef.vertexStartIndex = verticeRoof;
 
-        for (int j = 0; j < curMesh.Vertices.size(); j++) {
-            meshResult.vertexPositions[j].x = curMesh.Vertices[j].Position.X;
-        }
+    for (int i = 0; i < curMesh.Vertices.size(); ++i) {
+        VERTEX_POSITION(i) = float3{curMesh.Vertices[i].Position.X, curMesh.Vertices[i].Position.Y, curMesh.Vertices[i].Position.Z};
+    }
 
-        meshResult.faceNum = curMesh.Indices.size() / 3;
-        meshResult.faces = new uint3[meshResult.faceNum];
+    verticeRoof += meshRef.vertexNum;
 
-        for (int j = 0; j < curMesh.Indices.size(); j += 3) {
-            meshResult.faces[j / 3] = uint3{curMesh.Indices[j], curMesh.Indices[j + 1], curMesh.Indices[j + 2]};
-        }
+    // face
+    meshRef.faceNum = curMesh.Indices.size() / 3;
+    meshRef.faceStartIndex = faceRoof;
 
-        break;
+    for (int i = 0; i < curMesh.Indices.size(); i += 3) {
+        FACE(i / 3) = uint3{curMesh.Indices[i], curMesh.Indices[i + 1], curMesh.Indices[i + 2]};
     }
 
     printf("Successfully loaded model %s\n", fname);
-
-    return meshResult;
 }
 
 #endif

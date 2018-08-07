@@ -1,5 +1,6 @@
 #pragma once
 
+// quality control
 #define KERNAL_LOOP 4
 #define SAMPLES 512
 #define RAY_BOUNCE 6
@@ -17,6 +18,7 @@
     #define HEIGHT 384
 #endif
 
+// cuda dimension
 #define PATCH_WIDTH 256
 #define PATCH_HEIGHT 192
 #define PATCH_NUM_X (WIDTH / PATCH_WIDTH)
@@ -25,6 +27,22 @@
 #define BLOCK_SIZE 8
 #define NUM_BLOCKS (PATCH_WIDTH*PATCH_HEIGHT/BLOCK_SIZE/BLOCK_SIZE)
 
+// M_MATH
 #define M_PI 3.14159265359f
 #define M_INF 1e20f
 #define M_EPSILON 0.0001f
+
+// memory
+#define VERTEX_POOL_SIZE 5000
+#define FACE_POOL_SIZE 5000
+
+// functions
+#define CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(__TYPE__,__DEVICE_ARRAY__,__HOST_ARRAY__) \
+__TYPE__* __DEVICE_ARRAY__; \
+cudaMalloc(&__DEVICE_ARRAY__, sizeof(__HOST_ARRAY__)); \
+cudaMemcpy(__DEVICE_ARRAY__, __HOST_ARRAY__, sizeof(__HOST_ARRAY__), cudaMemcpyHostToDevice);
+
+#define CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE_SIZE(__TYPE__,__DEVICE_ARRAY__,__HOST_ARRAY__,__SIZE__) \
+__TYPE__* __DEVICE_ARRAY__; \
+cudaMalloc(&__DEVICE_ARRAY__, sizeof(__HOST_ARRAY__)); \
+cudaMemcpy(__DEVICE_ARRAY__, __HOST_ARRAY__, __SIZE__ * sizeof(__TYPE__), cudaMemcpyHostToDevice);
