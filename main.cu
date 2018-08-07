@@ -5,7 +5,7 @@
  * with 100% authentic home-made   *
  * CUDA codes and imported codes   *
  * from USA and all over the world *
- * No bugs free warranty           *
+ * NO bug-free warranty            *
  *                                 *
  ***********************************/
  
@@ -259,6 +259,7 @@ int main(){
         whiteDiffuse,
         whiteLight
     };
+    
     Geometry myHouse{IMPLICIT_AABB, 0, 0};
     Geometry myCeilingLight{IMPLICIT_SPHERE, 0, 1};
 
