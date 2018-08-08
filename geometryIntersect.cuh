@@ -182,18 +182,18 @@ inline __device__ float3 getTriangleNormal(
     return nl;
 }
 
-__device__ float RayTriMeshIntersection(
+__device__ float RayMeshIntersection(
     float3& normal,
     bool& isIntoSurface,
 
-    const TriMesh_d& mesh,
+    const Mesh& mesh,
     const Ray& ray)
 {
     for (uint i = 0 ; i < mesh.faceNum; ++i) {
         uint3 face = mesh.faces[i];
-        float3 v0 = mesh.vertices[face.x].position;
-        float3 v1 = mesh.vertices[face.y].position;
-        float3 v2 = mesh.vertices[face.z].position;
+        float3 v0 = mesh.vertices[face.x];
+        float3 v1 = mesh.vertices[face.y];
+        float3 v2 = mesh.vertices[face.z];
         float3 edge1 = v1 - v0;
         float3 edge2 = v2 - v0;
         float distanceRayTri = RayTriangleIntersection(ray, v0, edge1, edge2);

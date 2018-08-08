@@ -45,10 +45,8 @@ struct Attr{
     Sphere* spheres;
     AABB* aabbs;
 
-    // tri mesh
-    Vertex* vertices;
-    Face* faces;
-    TriMesh* triMeshes;
+    // array of vertices, faces and meshIndexOnlys
+    Meshes_SOA meshSOA;
 
     // mat
     Material* materials;
@@ -122,10 +120,9 @@ __global__ void renderKernal (
                     }                    
                 }
                 else if (geometry.geometryType == TRIANGLE_MESH) {
-                    TriMesh triMesh_h = attr.triMeshes[geometry.geometryIdx];
-                    TriMesh_d triMesh(triMesh_h.vertexNum, triMesh_h.faceNum, attr.vertices + triMesh_h.vertexStartIndex, attr.faces + triMesh_h.faceStartIndex);
+                    Mesh mesh = getMeshFromSOA(attr.meshSOA, geometry.geometryIdx);
 
-                    float distanceToObject = RayTriMeshIntersection(normalAtHitPoint, isIntoSurface, triMesh, currentRay);
+                    float distanceToObject = RayMeshIntersection(normalAtHitPoint, isIntoSurface, mesh, currentRay);
 
                     if (distanceToObject > M_EPSILON && distanceToObject < nearestIntersectionDistance) {
                         hitEmptyVoidSpace = false;
@@ -228,18 +225,13 @@ int main(){
     AABB myHouseAABB = AABB {float3{-80.0f, -40.0f, -10.0f},float3{80.0f, 80.0f, 200.0f}};
     Sphere sphereOnTheCeiling = Sphere {float3{0.0f, 80.0f, 100.0f} ,20.0f};
 
-    Vertex* vertices = new Vertex[VERTEX_POOL_SIZE];
-    Face* faces = new Face[FACE_POOL_SIZE];
-
     uint verticeRoof = 0;
     uint faceRoof = 0;
 
-    TriMesh bunnyMesh;
+    Mesh bunnyMesh = loadObj("basic_cube.obj");
 
-    loadObj("stanford_bunny.obj", vertices, faces, bunnyMesh, verticeRoof, faceRoof);
-
-    scaleTriMesh(vertices, faces, bunnyMesh, float3{5.0f, 5.0f, 5.0f});
-    translateTriMesh(vertices, faces, bunnyMesh, float3{0.0f, -10.0f, 120.0f});
+    scaleMesh(bunnyMesh, float3{5.0f, 5.0f, 5.0f});
+    translateMesh(bunnyMesh, float3{0.0f, -10.0f, 120.0f});
 
     Material whiteDiffuse {DIFFUSE, float3{0.0f, 0.0f, 0.0f}, float3{0.75f, 0.75f, 0.75f}};
     Material whiteLight {DIFFUSE, float3{1.0f, 1.0f, 1.0f}, float3{0.75f, 0.75f, 0.75f}};
@@ -251,7 +243,7 @@ int main(){
         myHouseAABB
     };
 
-    TriMesh triMeshes[] {
+    Mesh meshes[] {
         bunnyMesh
     };
 
@@ -260,25 +252,33 @@ int main(){
         whiteLight
     };
     
-    Geometry myHouse{IMPLICIT_AABB, 0, 0};
-    Geometry myCeilingLight{IMPLICIT_SPHERE, 0, 1};
+    Geometry myHouse {AABB, 0, 0};
+    Geometry myCeilingLight {SPHERE, 0, 1};
+    Geometry myNiceMesh {MESH, 0, 0};
 
     Geometry geometries[] {
         myHouse,
         myCeilingLight,
-        {TRIANGLE_MESH, 0, 0}
+        myNiceMesh
     };
 
     // copy data to cuda
-    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Sphere, spheres_d, spheres);
-    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(AABB, aabbs_d, aabbs);
+    
+    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Sphere, spheres_d, spheres)
+    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(AABB, aabbs_d, aabbs)
 
-    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE_SIZE(Vertex, vertices_d, vertices, verticeRoof);
-    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE_SIZE(Face, faces_d, faces, faceRoof);
-    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(TriMesh, triMeshes_d, triMeshes);
+    Meshes_SOA meshSOA;
+    convertMeshAOSToSOA(meshes, sizeof(meshes) / sizeof(Mesh), meshSOA);
 
-    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Material, materials_d, materials);
-    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Geometry, geometries_d, geometries);
+    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Vertex, vertices_d, meshSOA.vertices)
+    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Face, faces_d, meshSOA.faces)
+    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Mesh_IndexOnly, meshes_d, meshSOA.meshes)
+
+    Meshes_SOA meshSOA_d {vertices_d, faces_d, meshes_d};
+    deleteMeshSOA(meshSOA);
+
+    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Material, materials_d, materials)
+    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Geometry, geometries_d, geometries)
 
     Attr attr {
         sizeof(geometries) / sizeof(Geometry), 
@@ -286,9 +286,7 @@ int main(){
         spheres_d, 
         aabbs_d,
 
-        vertices_d,
-        faces_d,
-        triMeshes_d,
+        meshSOA_d,
 
         materials_d, 
         geometries_d
@@ -343,7 +341,7 @@ int main(){
     
     cudaFree(vertices_d);
     cudaFree(faces_d);
-    cudaFree(triMeshes_d);
+    cudaFree(meshes_d);
 
     cudaFree(materials_d);
     cudaFree(geometries_d);

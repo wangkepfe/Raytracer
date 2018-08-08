@@ -3,9 +3,9 @@
 #include "cutil_math.h"
 
 enum{
-    IMPLICIT_SPHERE,
-    IMPLICIT_AABB,
-    TRIANGLE_MESH,
+    SPHERE,
+    AABB,
+    MESH,
 };
 
 struct Geometry{
