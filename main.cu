@@ -29,6 +29,7 @@
 
 // C++ header libs
 #include "io_utils.h"
+#include "obj_loader.h"
 
 // CUDA header libs
 #include "geometry.cuh"
@@ -43,7 +44,7 @@ struct Attr{
 
     // implicit primitives
     Sphere* spheres;
-    AABB* aabbs;
+    AxisAlignedBoundingBox* aabbs;
 
     // array of vertices, faces and meshIndexOnlys
     Meshes_SOA meshSOA;
@@ -64,6 +65,7 @@ __global__ void renderKernal (
     uint x = blockIdx.x*blockDim.x + threadIdx.x;   
     uint y = blockIdx.y*blockDim.y + threadIdx.y;
     uint idx = (PATCH_HEIGHT - y - 1) * PATCH_WIDTH + x;
+    uint randStateidx = threadIdx.y * BLOCK_SIZE + threadIdx.x;
 
     uint realX = patch_offset.x + x;   
     uint realY = patch_offset.y + y;
@@ -93,7 +95,7 @@ __global__ void renderKernal (
             for (uint objectIdx = 0; objectIdx < attr.numberOfObject; ++objectIdx) {// scene intersection
                 Geometry geometry = attr.geometries[objectIdx];
 
-                if (geometry.geometryType == IMPLICIT_SPHERE) {
+                if (geometry.geometryType == SPHERE) {
                     Sphere sphere = attr.spheres[geometry.geometryIdx];
                     float distanceToObject = intersectSphereRay(sphere, currentRay);
     
@@ -106,8 +108,8 @@ __global__ void renderKernal (
                         hitObjectMaterialIdx = geometry.materialIdx;
                     }
                 } 
-                else if (geometry.geometryType == IMPLICIT_AABB) {
-                    AABB aabb = attr.aabbs[geometry.geometryIdx];
+                else if (geometry.geometryType == AABB) {
+                    AxisAlignedBoundingBox aabb = attr.aabbs[geometry.geometryIdx];
                     float distanceToObject = intersectAABBRayBothSide(aabb, currentRay);
     
                     if (distanceToObject > M_EPSILON && distanceToObject < nearestIntersectionDistance) {
@@ -119,8 +121,9 @@ __global__ void renderKernal (
                         hitObjectMaterialIdx = geometry.materialIdx;
                     }                    
                 }
-                else if (geometry.geometryType == TRIANGLE_MESH) {
-                    Mesh mesh = getMeshFromSOA(attr.meshSOA, geometry.geometryIdx);
+                else if (geometry.geometryType == MESH) {
+                    Mesh mesh;
+                    getMeshFromSOA(attr.meshSOA, geometry.geometryIdx, mesh);
 
                     float distanceToObject = RayMeshIntersection(normalAtHitPoint, isIntoSurface, mesh, currentRay);
 
@@ -157,7 +160,7 @@ __global__ void renderKernal (
                     normalAtHitPoint,
                     material.surfaceColor,
                     randstates,
-                    idx
+                    randStateidx
                 );
             }
             else if (material.surfaceType == SPECULAR) {
@@ -169,7 +172,7 @@ __global__ void renderKernal (
                     normalAtHitPoint,
                     material.surfaceColor,
                     randstates,
-                    idx
+                    randStateidx
                 );
             }
             else if (material.surfaceType == MIRROR) {
@@ -191,7 +194,7 @@ __global__ void renderKernal (
                     hitPoint,
                     normalAtHitPoint,
                     randstates,
-                    idx
+                    randStateidx
                 );
             }
             
@@ -204,10 +207,7 @@ __global__ void renderKernal (
 }
 
 __global__ void initRandStates(uint seed, curandState_t* randstates) {
-    uint x = blockIdx.x*blockDim.x + threadIdx.x;   
-    uint y = blockIdx.y*blockDim.y + threadIdx.y;
-    uint idx = (PATCH_HEIGHT - y - 1) * PATCH_WIDTH + x;
-
+    uint idx = threadIdx.y * BLOCK_SIZE + threadIdx.x;
     curand_init(seed, idx, 0, &randstates[idx]);
 }
 
@@ -218,20 +218,17 @@ int main(){
 
     // rand states
     curandState_t* randstates_d;
-    cudaMalloc((void**) &randstates_d, NUM_BLOCKS * sizeof(curandState_t));
-    initRandStates<<<grid, block>>>(time(NULL), randstates_d);
+    cudaMalloc((void**) &randstates_d, BLOCK_SIZE * BLOCK_SIZE * sizeof(curandState_t));
+    initRandStates<<<1, block>>>(time(NULL), randstates_d);
 
     // build the scene
-    AABB myHouseAABB = AABB {float3{-80.0f, -40.0f, -10.0f},float3{80.0f, 80.0f, 200.0f}};
-    Sphere sphereOnTheCeiling = Sphere {float3{0.0f, 80.0f, 100.0f} ,20.0f};
+    AxisAlignedBoundingBox myHouseAABB = AxisAlignedBoundingBox {float3{-80.0f, -40.0f, -10.0f},float3{80.0f, 80.0f, 200.0f}};
+    Sphere sphereOnTheCeiling = Sphere {float3{0.0f, 90.0f, 180.0f} ,20.0f};
 
-    uint verticeRoof = 0;
-    uint faceRoof = 0;
+    Mesh testMesh = loadObj("basicCube.obj");
 
-    Mesh bunnyMesh = loadObj("basic_cube.obj");
-
-    scaleMesh(bunnyMesh, float3{5.0f, 5.0f, 5.0f});
-    translateMesh(bunnyMesh, float3{0.0f, -10.0f, 120.0f});
+    scaleMesh(testMesh, float3{5.0f, 5.0f, 5.0f});
+    translateMesh(testMesh, float3{0.0f, -10.0f, 120.0f});
 
     Material whiteDiffuse {DIFFUSE, float3{0.0f, 0.0f, 0.0f}, float3{0.75f, 0.75f, 0.75f}};
     Material whiteLight {DIFFUSE, float3{1.0f, 1.0f, 1.0f}, float3{0.75f, 0.75f, 0.75f}};
@@ -239,19 +236,17 @@ int main(){
     Sphere spheres[] {
         sphereOnTheCeiling
     };
-    AABB aabbs[] {
+    AxisAlignedBoundingBox aabbs[] {
         myHouseAABB
     };
-
-    Mesh meshes[] {
-        bunnyMesh
-    };
-
+    Mesh *meshes;
+ //   Mesh meshes[] {
+ //       testMesh
+ //   };
     Material materials[] {
         whiteDiffuse,
         whiteLight
     };
-    
     Geometry myHouse {AABB, 0, 0};
     Geometry myCeilingLight {SPHERE, 0, 1};
     Geometry myNiceMesh {MESH, 0, 0};
@@ -261,13 +256,12 @@ int main(){
         myCeilingLight,
         myNiceMesh
     };
-
     // copy data to cuda
-    
     CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Sphere, spheres_d, spheres)
-    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(AABB, aabbs_d, aabbs)
+    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(AxisAlignedBoundingBox, aabbs_d, aabbs)
 
     Meshes_SOA meshSOA;
+
     convertMeshAOSToSOA(meshes, sizeof(meshes) / sizeof(Mesh), meshSOA);
 
     CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Vertex, vertices_d, meshSOA.vertices)
@@ -291,7 +285,7 @@ int main(){
         materials_d, 
         geometries_d
     };
-    
+
     // start rendering
     float3* output = new float3[WIDTH * HEIGHT];
     for (uint i = 0; i < WIDTH * HEIGHT; ++i) output[i] = make_float3(0.0f, 0.0f, 0.0f);
@@ -331,11 +325,13 @@ int main(){
 
     printf("Rendering...100%%\n");
     printf("Done!\n");
-    
+
     // output
     writeToPPM("result.ppm", WIDTH, HEIGHT, output);
 
     // clean
+    deleteMeshSOA(meshSOA);
+
     cudaFree(spheres_d); 
     cudaFree(aabbs_d);
     

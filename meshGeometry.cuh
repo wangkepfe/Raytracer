@@ -68,6 +68,7 @@ void convertMeshAOSToSOA(Mesh* meshPtr, uint meshNum, Meshes_SOA& meshSOA) {
 
         delete[] meshPtr[meshIndex].vertices;
         delete[] meshPtr[meshIndex].faces;
+
     }
 }
 
@@ -77,19 +78,29 @@ void deleteMeshSOA(Meshes_SOA& meshSOA) {
     delete[] meshSOA.meshes;
 }
 
-Mesh getMeshFromSOA(Meshes_SOA& meshSOA, uint meshIndex) {
-    Mesh mesh;
+__device__ void getMeshFromSOA(Meshes_SOA& meshSOA, uint meshIndex, Mesh& mesh) {
     Mesh_IndexOnly meshIndexOnly = meshSOA.meshes[meshIndex];
     mesh.vertexNum = meshIndexOnly.vertexNum;
     mesh.faceNum = meshIndexOnly.faceNum;
-    mesh.vertices = meshSOA.vertices[meshIndexOnly.vertexStartIndex];
-    mesh.faces = meshSOA.faces[meshIndexOnly.faceStartIndex];
-    return mesh;
+    mesh.vertices = meshSOA.vertices + meshIndexOnly.vertexStartIndex;
+    mesh.faces = meshSOA.faces + meshIndexOnly.faceStartIndex;
 }
 
 // basic mesh manipulation
 
 #define VERT_P(i) mesh.vertices[i]
+
+static void calculateBoundingBox(Mesh& mesh) {
+// calculate the bounding box of the mesh
+	// mesh.bounding_box[0] = make_float3(1000000, 1000000, 1000000);
+	// mesh.bounding_box[1] = make_float3(-1000000, -1000000, -1000000);
+	// for (unsigned int i = 0; i < mesh.verts.size(); i++)
+	// {
+	// 	//update min and max value
+	// 	mesh.bounding_box[0] = fminf(mesh.verts[i], mesh.bounding_box[0]);
+	// 	mesh.bounding_box[1] = fmaxf(mesh.verts[i], mesh.bounding_box[1]);
+	// }
+}	
 
 static void translateMesh(Mesh& mesh, const float3& transVec) {
     for (uint i = 0; i < mesh.vertexNum; ++i) {
@@ -98,7 +109,7 @@ static void translateMesh(Mesh& mesh, const float3& transVec) {
 }
 
 static void scaleMesh(Mesh& mesh, const float3& scaleVec) {
-    for (uint i = 0; i < meshRef.vertexNum; ++i) {
+    for (uint i = 0; i < mesh.vertexNum; ++i) {
         VERT_P(i).x *= scaleVec.x;
         VERT_P(i).y *= scaleVec.y;
         VERT_P(i).z *= scaleVec.z;
@@ -109,7 +120,7 @@ static void scaleMesh(Mesh& mesh, const float3& scaleVec) {
 if (rotateVec._X_ != 0) {                                                    \
     float cosTheta = cos(rotateVec._X_);                                     \
     float sinTheta = sin(rotateVec._X_);                                     \
-    for (uint i = 0; i < meshRef.vertexNum; ++i) {                           \
+    for (uint i = 0; i < mesh.vertexNum; ++i) {                           \
         VERT_P(i)._Y_ = VERT_P(i)._Y_ * cosTheta - VERT_P(i)._Z_ * sinTheta; \
         VERT_P(i)._Z_ = VERT_P(i)._Y_ * sinTheta + VERT_P(i)._Z_ * cosTheta; \
     }                                                                        \

@@ -32,10 +32,6 @@
 #define M_INF 1e20f
 #define M_EPSILON 0.0001f
 
-// memory
-#define VERTEX_POOL_SIZE 5000
-#define FACE_POOL_SIZE 5000
-
 // functions
 #define CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(__TYPE__,__DEVICE_ARRAY__,__HOST_ARRAY__) \
 __TYPE__* __DEVICE_ARRAY__; \

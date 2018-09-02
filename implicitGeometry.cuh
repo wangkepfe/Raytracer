@@ -12,7 +12,7 @@ struct Sphere{
     float rad;
 };
 
-struct AABB{
+struct AxisAlignedBoundingBox{
     float3 min;
     float3 max;
 };

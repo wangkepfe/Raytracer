@@ -37,7 +37,7 @@ inline __device__ float3 getSphereNormal(
 }
 
 inline __device__ float intersectAABBRayBothSide(
-    const AABB& aabb,
+    const AxisAlignedBoundingBox& aabb,
     const Ray& ray)
 {
     enum {LEFT, RIGHT, MIDDLE};
@@ -107,7 +107,7 @@ inline __device__ float intersectAABBRayBothSide(
 }
 
 inline __device__ float intersectAABBRay(
-    const AABB& aabb,
+    const AxisAlignedBoundingBox& aabb,
     const Ray& ray)
 {
     float3 tmin = (aabb.min - ray.orig) / ray.dir;
@@ -125,7 +125,7 @@ inline __device__ float intersectAABBRay(
 
 inline __device__ float3 getAABBNormal(
     const float3& pointOnAABB,
-    const AABB& aabb,
+    const AxisAlignedBoundingBox& aabb,
     float3 rayDir,
     bool& isIntoSurface)
 {
