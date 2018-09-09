@@ -3,12 +3,12 @@
 - [x] ray
 - [x] implicit sphere
 - [x] implicit aabb
-- [ ] triangle mesh
+- [x] triangle mesh
 
 ## Geometry - Intersection
 - [x] ray-sphere
 - [x] ray-aabb
-- [ ] ray-triangle
+- [x] ray-triangle
 ## Geometry - Smooth surface
 ## Geometry - Tessellation
 ## Accelerating Ray Tracing
@@ -46,10 +46,14 @@
 - Scene Attributes
 	- spheres
 	- aabbs
+	- triangle meshes
+		- vertices
+		- faces
+		- structure of array (conversion between array of structure)
 	- materials
 	- geometries
 - Geometry
-	- type: sphere, aabb
+	- type: sphere, aabb, mesh
 	- geometry index
 	- material index
 - Material
