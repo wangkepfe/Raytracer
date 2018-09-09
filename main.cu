@@ -57,6 +57,8 @@ __global__ void renderKernal (
     Attr attr, 
     curandState_t* randstates)
 {
+//    printf("%p %f %f %f\n", attr.meshSOA.vertices, attr.meshSOA.vertices[0].x, attr.meshSOA.vertices[0].y, attr.meshSOA.vertices[0].z);
+
     uint x = blockIdx.x*blockDim.x + threadIdx.x;   
     uint y = blockIdx.y*blockDim.y + threadIdx.y;
     uint idx = (PATCH_HEIGHT - y - 1) * PATCH_WIDTH + x;
@@ -118,10 +120,9 @@ __global__ void renderKernal (
                 }
                 else if (geometry.geometryType == MESH) {
                     Mesh mesh;
+                    //printf("%p %f %f %f\n", attr.meshSOA.vertices, attr.meshSOA.vertices[1].x, attr.meshSOA.vertices[1].y, attr.meshSOA.vertices[1].z);
                     getMeshFromSOA(attr.meshSOA, geometry.geometryIdx, mesh);
-                    for (uint i = 0; i < mesh.vertexNum; ++i) {
-                        printf("%f %f %f\n", mesh.vertices[i].x, mesh.vertices[i].y, mesh.vertices[i].z);
-                    }
+                    // printf("%f %f %f\n", mesh.vertices[0].x, mesh.vertices[0].y, mesh.vertices[0].z);
 
                     float distanceToObject = RayMeshIntersection(normalAtHitPoint, isIntoSurface, mesh, currentRay);
 
@@ -220,58 +221,73 @@ int main(){
     initRandStates<<<1, block>>>(time(NULL), randstates_d);
 
     // build the scene
-    AxisAlignedBoundingBox myHouseAABB = AxisAlignedBoundingBox {float3{-80.0f, -40.0f, -10.0f},float3{80.0f, 80.0f, 200.0f}};
-    Sphere sphereOnTheCeiling = Sphere {float3{0.0f, 90.0f, 180.0f} ,20.0f};
+    AxisAlignedBoundingBox myHouseAABB = AxisAlignedBoundingBox {float3{-80.0f, -40.0f, -10.0f},float3{80.0f, 80.0f, 250.0f}};
+    Sphere sphereOnTheCeiling = Sphere {float3{0.0f, 90.0f, 170.0f} ,20.0f};
+    Sphere sphereOnTheCeiling2 = Sphere {float3{0.0f, 90.0f, 100.0f} ,20.0f};
+    Sphere sphereOnTheGround = Sphere {float3{50.0f, -30.0f, 120.0f} ,20.0f};
 
-    Mesh testMesh = loadObj("basicCube.obj");
+    Mesh testMesh = loadObj("monkey.obj");
 
-    scaleMesh(testMesh, float3{5.0f, 5.0f, 5.0f});
-    translateMesh(testMesh, float3{0.0f, -10.0f, 120.0f});
-
+    scaleMesh(testMesh, float3{50.0f, 50.0f, 50.0f});
+    rotateMesh(testMesh, float3{0.0f, M_PI, 0.0f});
+    translateMesh(testMesh, float3{0.0f, 10.0f, 190.0f});
+    
     Material whiteDiffuse {DIFFUSE, float3{0.0f, 0.0f, 0.0f}, float3{0.75f, 0.75f, 0.75f}};
-    Material whiteLight {DIFFUSE, float3{1.0f, 1.0f, 1.0f}, float3{0.75f, 0.75f, 0.75f}};
+    Material redDiffuse {DIFFUSE, float3{0.0f, 0.0f, 0.0f}, float3{1.0f, 0.1f, 0.1f}};
+    Material whiteLight {DIFFUSE, float3{2.0f, 2.0f, 2.0f}, float3{0.75f, 0.75f, 0.75f}};
 
     Sphere spheres[] {
-        sphereOnTheCeiling
+        sphereOnTheCeiling,
+        sphereOnTheCeiling2,
+        sphereOnTheGround
     };
+    
     AxisAlignedBoundingBox aabbs[] {
         myHouseAABB
     };
- //   Mesh *meshes;
+
+    //Mesh *meshes;
+    uint meshNum = 1;
     Mesh meshes[] {
         testMesh
     };
+
     Material materials[] {
         whiteDiffuse,
-        whiteLight
+        whiteLight,
+        redDiffuse
     };
+
     Geometry myHouse {AABB, 0, 0};
     Geometry myCeilingLight {SPHERE, 0, 1};
-    Geometry myNiceMesh {MESH, 0, 0};
+    Geometry myCeilingLight2 {SPHERE, 1, 1};
+    Geometry myFLoorLight {SPHERE, 2, 1};
+    Geometry myNiceMesh {MESH, 0, 2};
 
     Geometry geometries[] {
         myHouse,
         myCeilingLight,
+        myCeilingLight2,
+        myFLoorLight,
         myNiceMesh
     };
     // copy data to cuda
-    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Sphere, spheres_d, spheres)
-    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(AxisAlignedBoundingBox, aabbs_d, aabbs)
+    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Sphere, spheres_d, spheres, sizeof(spheres))
+    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(AxisAlignedBoundingBox, aabbs_d, aabbs, sizeof(aabbs))
 
-    Meshes_SOA meshSOA;
+    Meshes_SOA meshSOA = convertMeshAOSToSOA(meshes, meshNum);
 
-    convertMeshAOSToSOA(meshes, sizeof(meshes) / sizeof(Mesh), meshSOA);
+    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Vertex, vertices_d, meshSOA.vertices, meshSOA.vertexNum * sizeof(Vertex))
+    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Face, faces_d, meshSOA.faces, meshSOA.faceNum * sizeof(Face))
+    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Mesh_IndexOnly, meshes_d, meshSOA.meshes, meshSOA.meshNum * sizeof(Mesh_IndexOnly))
 
-    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Vertex, vertices_d, meshSOA.vertices)
-    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Face, faces_d, meshSOA.faces)
-    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Mesh_IndexOnly, meshes_d, meshSOA.meshes)
+    Meshes_SOA meshSOA_d;
+    meshSOA_d.vertices = vertices_d;
+    meshSOA_d.faces = faces_d;
+    meshSOA_d.meshes = meshes_d;
 
-    Meshes_SOA meshSOA_d {vertices_d, faces_d, meshes_d};
-
-    deleteMeshSOA(meshSOA);
-
-    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Material, materials_d, materials)
-    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Geometry, geometries_d, geometries)
+    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Material, materials_d, materials, sizeof(materials))
+    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Geometry, geometries_d, geometries, sizeof(geometries))
 
     Attr attr {
         sizeof(geometries) / sizeof(Geometry), 
@@ -343,6 +359,7 @@ int main(){
 
     cudaFree(randstates_d);
 
+    deleteMeshSOA(meshSOA);
     delete[] output;
     delete[] output_patch;
 }

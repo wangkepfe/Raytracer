@@ -176,7 +176,7 @@ inline __device__ float3 getTriangleNormal(
     const float3 &edge2,
     bool& isIntoSurface)
 {
-    float3 normal = cross(edge1, edge2);
+    float3 normal = normalize(cross(edge1, edge2));
     isIntoSurface = dot(normal, rayDir) < 0;
     float3 nl = isIntoSurface ? normal : (-normal); // front facing normal
     return nl;
@@ -189,6 +189,13 @@ __device__ float RayMeshIntersection(
     const Mesh& mesh,
     const Ray& ray)
 {
+    //printf("%u %u\n", mesh.faceNum, mesh.vertexNum);
+    //printf("%u %u %u\n", mesh.faces[1].x, mesh.faces[1].y, mesh.faces[1].z);
+    //printf("%f %f %f\n", mesh.vertices[mesh.faces[0].x].x, mesh.vertices[mesh.faces[0].x].y, mesh.vertices[mesh.faces[0].x].z);
+
+    float nearestIntersectionDistance = M_INF;
+    bool hitEmptyVoidSpace = true;
+
     for (uint i = 0 ; i < mesh.faceNum; ++i) {
         uint3 face = mesh.faces[i];
         float3 v0 = mesh.vertices[face.x];
@@ -196,14 +203,23 @@ __device__ float RayMeshIntersection(
         float3 v2 = mesh.vertices[face.z];
         float3 edge1 = v1 - v0;
         float3 edge2 = v2 - v0;
-        float distanceRayTri = RayTriangleIntersection(ray, v0, edge1, edge2);
-        if (distanceRayTri < 0.0f) {
-            continue;
-        } else {
+        // if (i == 11) {
+        //     printf("%f %f %f , %f %f %f , %f %f %f\n", v0.x, v0.y, v0.z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z);
+        // }
+        //printf("%f %f %f , %f %f %f , %f %f %f\n", v0.x, v0.y, v0.z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z);
+        float distanceToObject = RayTriangleIntersection(ray, v0, edge1, edge2);
+        //printf("%f\n", distanceRayTri);
+
+        if (distanceToObject > M_EPSILON && distanceToObject < nearestIntersectionDistance) {
+            hitEmptyVoidSpace = false;
+            nearestIntersectionDistance = distanceToObject;
             normal = getTriangleNormal(ray.dir, edge1, edge2, isIntoSurface);
-            return distanceRayTri;
         }
     }
-    return -1.0f;
+    if (hitEmptyVoidSpace) {
+        return -1;
+    } else {
+        return nearestIntersectionDistance;
+    }
 }
 

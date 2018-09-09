@@ -30,12 +30,18 @@ struct Mesh_IndexOnly { // index only
 };
 
 struct Meshes_SOA { // struct of array only
+    uint vertexNum;
+    uint faceNum;
+    uint meshNum;
+
     Vertex* vertices;
     Face* faces;
     Mesh_IndexOnly* meshes;
 };
 
-void convertMeshAOSToSOA(Mesh* meshPtr, uint meshNum, Meshes_SOA& meshSOA) {
+Meshes_SOA convertMeshAOSToSOA(Mesh* meshPtr, uint meshNum) {
+    Meshes_SOA meshSOA;
+
     uint totalVertexNum = 0;
     uint totalFaceNum = 0;
 
@@ -43,6 +49,10 @@ void convertMeshAOSToSOA(Mesh* meshPtr, uint meshNum, Meshes_SOA& meshSOA) {
         totalVertexNum += meshPtr[meshIndex].vertexNum;
         totalFaceNum += meshPtr[meshIndex].faceNum;
     }
+
+    meshSOA.vertexNum = totalVertexNum;
+    meshSOA.faceNum = totalFaceNum;
+    meshSOA.meshNum = meshNum;
 
     meshSOA.vertices = new Vertex[totalVertexNum];
     meshSOA.faces = new Face[totalFaceNum];
@@ -65,11 +75,9 @@ void convertMeshAOSToSOA(Mesh* meshPtr, uint meshNum, Meshes_SOA& meshSOA) {
         for (uint i = 0; i < meshPtr[meshIndex].faceNum; ++i) {
             meshSOA.faces[faceIndex++] = meshPtr[meshIndex].faces[i];
         }
-
-        delete[] meshPtr[meshIndex].vertices;
-        delete[] meshPtr[meshIndex].faces;
-
     }
+
+    return meshSOA;
 }
 
 void deleteMeshSOA(Meshes_SOA& meshSOA) {
@@ -80,6 +88,7 @@ void deleteMeshSOA(Meshes_SOA& meshSOA) {
 
 __device__ void getMeshFromSOA(Meshes_SOA& meshSOA, uint meshIndex, Mesh& mesh) {
     Mesh_IndexOnly meshIndexOnly = meshSOA.meshes[meshIndex];
+    //printf("%u %u %u %u\n", meshIndexOnly.vertexNum, meshIndexOnly.faceNum, meshIndexOnly.vertexStartIndex, meshIndexOnly.faceStartIndex);
     mesh.vertexNum = meshIndexOnly.vertexNum;
     mesh.faceNum = meshIndexOnly.faceNum;
     mesh.vertices = meshSOA.vertices + meshIndexOnly.vertexStartIndex;

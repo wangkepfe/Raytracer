@@ -6,6 +6,9 @@
 #include <vector>
 #include <fstream>
 
+static std::vector<float3> vertices;
+static std::vector<uint3> faces;
+
 Mesh loadObj(const std::string filename) {
 
 	std::ifstream in(filename.c_str());
@@ -15,9 +18,6 @@ Mesh loadObj(const std::string filename) {
 		system("PAUSE");
 		exit(0);
 	}
-
-	std::vector<float3> vertices;
-	std::vector<uint3> faces;
 
 	char buffer[256], str[255];
 	float f1, f2, f3;
@@ -39,7 +39,7 @@ Mesh loadObj(const std::string filename) {
 				//std::cout << "ERROR: I don't know the format of that face\n";
 				exit(-1);
 			}
-			faces.push_back(make_uint3(ui1, ui2, ui3));
+			faces.push_back(make_uint3(ui1 - 1, ui2 - 1, ui3 - 1));
 		}
 	}
 
