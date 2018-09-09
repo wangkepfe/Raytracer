@@ -2,11 +2,6 @@
  *                                 *
  *      A very n1ce raytracer      *
  *                                 *
- * with 100% authentic home-made   *
- * CUDA codes and imported codes   *
- * from USA and all over the world *
- * NO bug-free warranty            *
- *                                 *
  ***********************************/
  
 // Author: Ke Wang
@@ -124,6 +119,9 @@ __global__ void renderKernal (
                 else if (geometry.geometryType == MESH) {
                     Mesh mesh;
                     getMeshFromSOA(attr.meshSOA, geometry.geometryIdx, mesh);
+                    for (uint i = 0; i < mesh.vertexNum; ++i) {
+                        printf("%f %f %f\n", mesh.vertices[i].x, mesh.vertices[i].y, mesh.vertices[i].z);
+                    }
 
                     float distanceToObject = RayMeshIntersection(normalAtHitPoint, isIntoSurface, mesh, currentRay);
 
@@ -239,10 +237,10 @@ int main(){
     AxisAlignedBoundingBox aabbs[] {
         myHouseAABB
     };
-    Mesh *meshes;
- //   Mesh meshes[] {
- //       testMesh
- //   };
+ //   Mesh *meshes;
+    Mesh meshes[] {
+        testMesh
+    };
     Material materials[] {
         whiteDiffuse,
         whiteLight
@@ -269,6 +267,7 @@ int main(){
     CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Mesh_IndexOnly, meshes_d, meshSOA.meshes)
 
     Meshes_SOA meshSOA_d {vertices_d, faces_d, meshes_d};
+
     deleteMeshSOA(meshSOA);
 
     CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Material, materials_d, materials)
@@ -330,8 +329,6 @@ int main(){
     writeToPPM("result.ppm", WIDTH, HEIGHT, output);
 
     // clean
-    deleteMeshSOA(meshSOA);
-
     cudaFree(spheres_d); 
     cudaFree(aabbs_d);
     
