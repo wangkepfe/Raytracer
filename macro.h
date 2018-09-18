@@ -3,7 +3,8 @@
 // quality control
 #define KERNAL_LOOP 6
 #define SAMPLES 64
-#define RAY_BOUNCE 6
+
+#define MAX_RAY_BOUNCE 50
 
 #define __SETTING__RESOLUTION 2
 

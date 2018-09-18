@@ -13,3 +13,6 @@ __constant__ static float3 mistColor{0.02f, 0.02f, 0.02f};
 __constant__ static float3 camOrig{0.0f, 0.0f, 0.0f};
 __constant__ static float3 camDir{0.0f, 0.0f, 1.0f};
 __constant__ static float camFov = 0.5135f;
+
+
+__constant__ static float pRussianRoulette = 0.7f;

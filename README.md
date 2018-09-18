@@ -17,7 +17,7 @@
 ## Global Illumination
 - [x] Monte Carlo Integration
 - [x] Path tracing
-- [ ] Russian Roulette
+- [x] Russian Roulette
 - [ ] Importance sampling
 ## Surface model
 - [x] Diffuse

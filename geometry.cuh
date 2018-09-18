@@ -2,13 +2,13 @@
 
 #include "cutil_math.h"
 
-enum{
+enum {
     SPHERE,
     AABB,
     MESH,
 };
 
-struct Geometry{
+struct Geometry {
     int geometryType;
     int geometryIdx;
     int materialIdx;

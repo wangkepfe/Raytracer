@@ -5,8 +5,10 @@
 
 #include "cutil_math.h"
 #include "implicitGeometry.cuh"
+#include "geometry.cuh"
+#include "sceneAttributes.cuh"
 
-__device__ inline static float3 uniformHemisphereSample(float r1, float r2){
+__device__ inline static float3 uniformHemisphereSample(float r1, float r2) {
     // x^2 + y^2 = 1
     float x = sqrtf(r1);
     float y = sqrtf(max(0.0f, 1.0f - r1));
@@ -20,12 +22,46 @@ __device__ inline static float3 uniformHemisphereSample(float r1, float r2){
     );
 }
 
+__device__ inline static float3 importanceSampling (
+    const Attr& attr,
+    const float3& hitPoint, 
+    curandState_t* randstates,
+    int idx 
+) {
+    for (uint i = 0; i < attr.numberOfLights; ++i) {
+        Geometry geometry = attr.geometries[attr.lightIndices[i]];
+        if (geometry.geometryType == SPHERE) {
+            Sphere lightSphere = attr.spheres[geometry.geometryIdx];
+
+            float3 sphereCenter = lightSphere.orig;
+            float sphereRadius = lightSphere.rad;
+
+            // random sample
+            float r1 = curand_uniform(&randstates[idx]);
+            float r2 = curand_uniform(&randstates[idx]);
+            float3 rdSamp = uniformHemisphereSample(r1, r2);
+
+            // uvw coords
+            float3 w = hitPoint - lightSphere.orig; 
+            float3 u = normalize(cross((fabs(w.x) > 0.1f ? make_float3(0, 1, 0) : make_float3(1, 0, 0)), w));  
+            float3 v = cross(w, u);
+
+            // random out point on light
+            float3 pointOnLight = sphereCenter + sphereRadius * normalize(u * rdSamp.x + v * rdSamp.y + w * rdSamp.z);
+        }
+    }
+}
+
 __device__ static void diffuseSurface(
     Ray& ray,
     float3& colorMask,
+
     const float3& hitPoint,
     const float3& normalAtHitPoint,
     const float3& materialColor,
+
+    const Attr& attr,
+
     curandState_t* randstates,
     int idx
 ) {

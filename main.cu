@@ -33,23 +33,7 @@
 #include "material.cuh"
 #include "surface.cuh"
 #include "meshGeometry.cuh"
-
-struct Attr{
-    uint numberOfObject;
-
-    // implicit primitives
-    Sphere* spheres;
-    AxisAlignedBoundingBox* aabbs;
-
-    // array of vertices, faces and meshIndexOnlys
-    Meshes_SOA meshSOA;
-
-    // mat
-    Material* materials;
-
-    // geo
-    Geometry* geometries;
-};
+#include "sceneAttributes.cuh"
 
 __global__ void renderKernal (
     float3 *output,
@@ -80,7 +64,7 @@ __global__ void renderKernal (
         float3 accumulativeColor = make_float3(0.0f, 0.0f, 0.0f);
         float3 colorMask = make_float3(1.0f, 1.0f, 1.0f);
 
-        for (uint bounces = 0; bounces < RAY_BOUNCE; bounces++) {//bounce
+        for (uint bounces = 0; curand_uniform(&randstates[randStateidx]) < pRussianRoulette && bounces < MAX_RAY_BOUNCE; bounces++) {//bounce
             float3 hitPoint;
             float3 normalAtHitPoint;
             bool isIntoSurface = true;
@@ -158,6 +142,9 @@ __global__ void renderKernal (
                     hitPoint,
                     normalAtHitPoint,
                     material.surfaceColor,
+
+                    attr,
+
                     randstates,
                     randStateidx
                 );
@@ -224,9 +211,9 @@ int main(){
     AxisAlignedBoundingBox myHouseAABB = AxisAlignedBoundingBox {float3{-80.0f, -40.0f, -10.0f},float3{80.0f, 80.0f, 250.0f}};
     Sphere sphereOnTheCeiling = Sphere {float3{0.0f, 90.0f, 170.0f} ,20.0f};
     Sphere sphereOnTheCeiling2 = Sphere {float3{0.0f, 90.0f, 100.0f} ,20.0f};
-    Sphere sphereOnTheGround = Sphere {float3{50.0f, -30.0f, 120.0f} ,20.0f};
+    Sphere sphereOnTheGround = Sphere {float3{50.0f, -30.0f, 120.0f} ,10.0f};
 
-    Mesh testMesh = loadObj("monkey.obj");
+    Mesh testMesh = loadObj("cone.obj");
 
     scaleMesh(testMesh, float3{50.0f, 50.0f, 50.0f});
     rotateMesh(testMesh, float3{0.0f, M_PI, 0.0f});
@@ -241,7 +228,7 @@ int main(){
         sphereOnTheCeiling2,
         sphereOnTheGround
     };
-    
+
     AxisAlignedBoundingBox aabbs[] {
         myHouseAABB
     };
@@ -271,6 +258,11 @@ int main(){
         myFLoorLight,
         myNiceMesh
     };
+
+    uint geometryNum = sizeof(geometries) / sizeof(Geometry);
+    uint lightNum = 3;
+    uint lightIndices[3] = {1, 2, 3};
+
     // copy data to cuda
     CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Sphere, spheres_d, spheres, sizeof(spheres))
     CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(AxisAlignedBoundingBox, aabbs_d, aabbs, sizeof(aabbs))
@@ -289,8 +281,11 @@ int main(){
     CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Material, materials_d, materials, sizeof(materials))
     CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Geometry, geometries_d, geometries, sizeof(geometries))
 
+    CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(uint, lightIndices_d, lightIndices, sizeof(lightIndices))
+
     Attr attr {
-        sizeof(geometries) / sizeof(Geometry), 
+        geometryNum, 
+        lightNum,
 
         spheres_d, 
         aabbs_d,
@@ -298,7 +293,9 @@ int main(){
         meshSOA_d,
 
         materials_d, 
-        geometries_d
+        geometries_d,
+
+        lightIndices_d
     };
 
     // start rendering
