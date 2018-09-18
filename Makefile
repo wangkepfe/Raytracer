@@ -15,3 +15,6 @@ git :
 	git status
 	git commit -m "updated"
 	git push
+
+clean:
+	del *.exe *.exp *.lib

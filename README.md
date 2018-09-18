@@ -18,7 +18,7 @@
 - [x] Monte Carlo Integration
 - [x] Path tracing
 - [x] Russian Roulette
-- [ ] Importance sampling
+- [x] Importance sampling
 ## Surface model
 - [x] Diffuse
 - [x] Specular

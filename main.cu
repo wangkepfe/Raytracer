@@ -150,16 +150,16 @@ __global__ void renderKernal (
                 );
             }
             else if (material.surfaceType == SPECULAR) {
-                specularSurface(
-                    currentRay,
-                    colorMask,
+                // specularSurface(
+                //     currentRay,
+                //     colorMask,
 
-                    hitPoint,
-                    normalAtHitPoint,
-                    material.surfaceColor,
-                    randstates,
-                    randStateidx
-                );
+                //     hitPoint,
+                //     normalAtHitPoint,
+                //     material.surfaceColor,
+                //     randstates,
+                //     randStateidx
+                // );
             }
             else if (material.surfaceType == MIRROR) {
                 mirrorSurface(
@@ -258,10 +258,10 @@ int main(){
         myFLoorLight,
         myNiceMesh
     };
-
     uint geometryNum = sizeof(geometries) / sizeof(Geometry);
-    uint lightNum = 3;
-    uint lightIndices[3] = {1, 2, 3};
+
+    uint lightIndices[] = {1, 2, 3};
+    uint lightNum = sizeof(lightIndices) / sizeof(uint);
 
     // copy data to cuda
     CUDA_MALLOC_MEMCPY_HOST_TO_DEVICE(Sphere, spheres_d, spheres, sizeof(spheres))

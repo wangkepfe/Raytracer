@@ -1,12 +1,12 @@
 #pragma once
 
 // quality control
-#define KERNAL_LOOP 6
+#define KERNAL_LOOP 20
 #define SAMPLES 64
 
 #define MAX_RAY_BOUNCE 50
 
-#define __SETTING__RESOLUTION 2
+#define __SETTING__RESOLUTION 1
 
 #if __SETTING__RESOLUTION == 1
     #define WIDTH 1024 

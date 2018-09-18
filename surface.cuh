@@ -22,34 +22,58 @@ __device__ inline static float3 uniformHemisphereSample(float r1, float r2) {
     );
 }
 
+__device__ inline static float3 uniformHemisphereSampleFrom (
+    float3 inDir,
+    curandState_t* randstates,
+    int idx 
+) {
+    // random sample
+    float r1 = curand_uniform(&randstates[idx]);
+    float r2 = curand_uniform(&randstates[idx]);
+    float3 rdSamp = uniformHemisphereSample(r1, r2);
+
+    // uvw coords
+    float3 w = inDir; 
+    float3 u = normalize(cross((fabs(w.x) > 0.1f ? make_float3(0, 1, 0) : make_float3(1, 0, 0)), w));  
+    float3 v = cross(w, u);
+
+    // random out direction
+    return normalize(u * rdSamp.x + v * rdSamp.y + w * rdSamp.z);
+}
+
 __device__ inline static float3 importanceSampling (
     const Attr& attr,
     const float3& hitPoint, 
     curandState_t* randstates,
     int idx 
 ) {
-    for (uint i = 0; i < attr.numberOfLights; ++i) {
-        Geometry geometry = attr.geometries[attr.lightIndices[i]];
-        if (geometry.geometryType == SPHERE) {
-            Sphere lightSphere = attr.spheres[geometry.geometryIdx];
+    // randomly choose one of the light source
+    float r0 = curand_uniform(&randstates[idx]);
+    r0 = clamp(r0, M_EPSILON, 1.0f - M_EPSILON);
+    uint lightSecondIndex = attr.numberOfLights * r0;
+    Geometry geometry = attr.geometries[attr.lightIndices[lightSecondIndex]];
 
-            float3 sphereCenter = lightSphere.orig;
-            float sphereRadius = lightSphere.rad;
+    // only handle sphere light for now!
+    // to do: make it generic for all kinds of lights
+    if (geometry.geometryType == SPHERE) {
+        Sphere lightSphere = attr.spheres[geometry.geometryIdx];
 
-            // random sample
-            float r1 = curand_uniform(&randstates[idx]);
-            float r2 = curand_uniform(&randstates[idx]);
-            float3 rdSamp = uniformHemisphereSample(r1, r2);
+        float3 sphereCenter = lightSphere.orig;
+        float sphereRadius = lightSphere.rad;
 
-            // uvw coords
-            float3 w = hitPoint - lightSphere.orig; 
-            float3 u = normalize(cross((fabs(w.x) > 0.1f ? make_float3(0, 1, 0) : make_float3(1, 0, 0)), w));  
-            float3 v = cross(w, u);
+        // random point on light bulb
+        float3 pointOnLight = sphereCenter 
+            + sphereRadius 
+            * uniformHemisphereSampleFrom(hitPoint - lightSphere.orig, randstates, idx);
 
-            // random out point on light
-            float3 pointOnLight = sphereCenter + sphereRadius * normalize(u * rdSamp.x + v * rdSamp.y + w * rdSamp.z);
-        }
+        // random direction from hit point to light (important direction for the hit point)
+        float3 importantDir = normalize(pointOnLight - hitPoint);
+
+        return importantDir;
     }
+
+    printf("not sphere light\n");
+    return make_float3(1.0f, 0.0f, 0.0f);
 }
 
 __device__ static void diffuseSurface(
@@ -68,18 +92,21 @@ __device__ static void diffuseSurface(
     // defined parameters
     float fudgeFactor = 1.6f;
 
-    // random sample
-    float r1 = curand_uniform(&randstates[idx]);
-    float r2 = curand_uniform(&randstates[idx]);
-    float3 rdSamp = uniformHemisphereSample(r1, r2);
+    float3 d;
 
-    // uvw coords
-    float3 w = normalAtHitPoint; 
-    float3 u = normalize(cross((fabs(w.x) > 0.1f ? make_float3(0, 1, 0) : make_float3(1, 0, 0)), w));  
-    float3 v = cross(w, u);
+    // importance sampling
+    float r0 = curand_uniform(&randstates[idx]);
 
-    // random out direction
-    float3 d = normalize(u * rdSamp.x + v * rdSamp.y + w * rdSamp.z);
+    // the probabily of distribution is a pure guess:
+    // - higher: good for surface exposed to the light
+    // - lower: the opposite
+    if (r0 < 0.1f) {
+        // go to light directly
+        d = importanceSampling(attr, hitPoint, randstates, idx);
+    } else {
+        // random out direction: from normal create a hemisphere sample
+        d = uniformHemisphereSampleFrom(normalAtHitPoint, randstates, idx);
+    }
 
     ray.orig = hitPoint + normalAtHitPoint * M_EPSILON;
     ray.dir = d;
@@ -90,64 +117,64 @@ __device__ static void diffuseSurface(
     colorMask *= fudgeFactor;
 }
 
-__device__ static void specularSurface(
-    Ray& ray,
-    float3& colorMask,
-    const float3& hitPoint,
-    const float3& normalAtHitPoint,
-    const float3& materialColor,
-    curandState_t* randstates,
-    int idx
-) {
-    // defined parameters
-    float diffusePercent = 0.4f;
-    float glossyFactor = 16.0f;
-    float fudgeFactor = 2.5f;
+// __device__ static void specularSurface(
+//     Ray& ray,
+//     float3& colorMask,
+//     const float3& hitPoint,
+//     const float3& normalAtHitPoint,
+//     const float3& materialColor,
+//     curandState_t* randstates,
+//     int idx
+// ) {
+//     // defined parameters
+//     float diffusePercent = 0.4f;
+//     float glossyFactor = 16.0f;
+//     float fudgeFactor = 2.5f;
 
-    // mixture of diffuse and specular, decided by probability
-    float r3 = curand_uniform(&randstates[idx]);
+//     // mixture of diffuse and specular, decided by probability
+//     float r3 = curand_uniform(&randstates[idx]);
 
-    // diffuse
-    if (r3 < diffusePercent) {
-        diffuseSurface(
-            ray,
-            colorMask,
-            hitPoint,
-            normalAtHitPoint,
-            materialColor,
-            randstates,
-            idx
-        );
-        return;
-    }
+//     // diffuse
+//     if (r3 < diffusePercent) {
+//         diffuseSurface(
+//             ray,
+//             colorMask,
+//             hitPoint,
+//             normalAtHitPoint,
+//             materialColor,
+//             randstates,
+//             idx
+//         );
+//         return;
+//     }
 
-    // fuzz specular
+//     // fuzz specular
 
-    float3 d;
-    float3 refl = reflect(ray.dir, normalAtHitPoint); 
-    do {
-        // random sample
-        float r1 = curand_uniform(&randstates[idx]);
-        float r2 = curand_uniform(&randstates[idx]);
-        float3 rdSamp = uniformHemisphereSample(r1, r2);
+//     float3 d;
+//     float3 refl = reflect(ray.dir, normalAtHitPoint); 
+//     do {
+//         // random sample
+//         float r1 = curand_uniform(&randstates[idx]);
+//         float r2 = curand_uniform(&randstates[idx]);
+//         float3 rdSamp = uniformHemisphereSample(r1, r2);
 
-        // uvw coords based on reflection
-        float3 w = refl; 
-        float3 u = normalize(cross((fabs(w.x) > 0.1f ? make_float3(0, 1, 0) : make_float3(1, 0, 0)), w));  
-        float3 v = cross(w, u);
+//         // uvw coords based on reflection
+//         float3 w = refl; 
+//         float3 u = normalize(cross((fabs(w.x) > 0.1f ? make_float3(0, 1, 0) : make_float3(1, 0, 0)), w));  
+//         float3 v = cross(w, u);
 
-        // out direction based on reflection + random
-        d = normalize(u * rdSamp.x + v * rdSamp.y + w * rdSamp.z);
-    } 
-    while (dot(d, normalAtHitPoint) <= 0); // please dont sneak through the wall
+//         // out direction based on reflection + random
+//         d = normalize(u * rdSamp.x + v * rdSamp.y + w * rdSamp.z);
+//     } 
+//     while (dot(d, normalAtHitPoint) <= 0); // please dont sneak through the wall
     
-    ray.orig = hitPoint + normalAtHitPoint * M_EPSILON;
-    ray.dir = d;
+//     ray.orig = hitPoint + normalAtHitPoint * M_EPSILON;
+//     ray.dir = d;
 
-    // glossy level incident factor + fudge factor
-    colorMask *= powf(dot(d, refl), glossyFactor);
-    colorMask *= fudgeFactor;
-}
+//     // glossy level incident factor + fudge factor
+//     colorMask *= powf(dot(d, refl), glossyFactor);
+//     colorMask *= fudgeFactor;
+// }
 
 __device__ static void mirrorSurface(
     Ray& ray,
